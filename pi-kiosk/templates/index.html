@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FW Attendance</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a1a;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 24px;
+            background: #111;
+            border-bottom: 2px solid #B8860B;
+        }
+        .header .logo {
+            font-size: 1.4em;
+            font-weight: 700;
+            color: #B8860B;
+        }
+        .header .clock {
+            font-size: 1.6em;
+            font-weight: 300;
+            font-variant-numeric: tabular-nums;
+        }
+        .header .date {
+            font-size: 0.9em;
+            color: #888;
+        }
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .camera-container {
+            width: 480px;
+            height: 360px;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 3px solid #333;
+            background: #000;
+            transition: border-color 0.3s;
+        }
+        .camera-container.recognized { border-color: #4CAF50; }
+        .camera-container.unknown { border-color: #f44336; }
+
+        .camera-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .status-banner {
+            margin-top: 24px;
+            padding: 20px 40px;
+            border-radius: 12px;
+            font-size: 1.6em;
+            font-weight: 600;
+            text-align: center;
+            min-width: 480px;
+            transition: all 0.3s ease;
+        }
+
+        .status-idle {
+            background: #2a2a2a;
+            color: #B8860B;
+            border: 2px solid #B8860B;
+        }
+        .status-recognized {
+            background: #1b5e20;
+            color: #fff;
+            border: 2px solid #4CAF50;
+        }
+        .status-already {
+            background: #1a3a5c;
+            color: #90CAF9;
+            border: 2px solid #42A5F5;
+        }
+        .status-unknown {
+            background: #b71c1c;
+            color: #fff;
+            border: 2px solid #f44336;
+        }
+        .status-error {
+            background: #4a1010;
+            color: #ff8a80;
+            border: 2px solid #ff5252;
+        }
+
+        .sub-text {
+            margin-top: 8px;
+            font-size: 0.85em;
+            color: #aaa;
+            text-align: center;
+        }
+
+        .indicators {
+            position: absolute;
+            top: 12px;
+            right: 16px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8em;
+            color: #888;
+        }
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .dot.online { background: #4CAF50; }
+        .dot.offline { background: #ff9800; }
+
+        .footer {
+            padding: 8px 24px;
+            background: #111;
+            text-align: center;
+            font-size: 0.75em;
+            color: #555;
+            border-top: 1px solid #333;
+        }
+
+        /* Manual clock overlay */
+        .manual-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        .manual-overlay.active { display: flex; }
+        .manual-overlay input {
+            font-size: 1.4em;
+            padding: 12px 24px;
+            border-radius: 8px;
+            border: 2px solid #B8860B;
+            background: #222;
+            color: #fff;
+            text-align: center;
+            width: 300px;
+            outline: none;
+        }
+        .manual-overlay button {
+            margin-top: 16px;
+            font-size: 1.2em;
+            padding: 10px 32px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .manual-overlay .btn-submit {
+            background: #B8860B;
+            color: #fff;
+        }
+        .manual-overlay .btn-cancel {
+            background: #444;
+            color: #fff;
+            margin-left: 12px;
+        }
+
+        @media (max-width: 600px) {
+            .camera-container { width: 320px; height: 240px; }
+            .status-banner { min-width: 320px; font-size: 1.2em; padding: 14px 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <div class="logo">⚡ FW Attendance</div>
+            <div class="date" id="dateDisplay"></div>
+        </div>
+        <div class="clock" id="clockDisplay"></div>
+    </div>
+
+    <div class="main">
+        <div class="indicators">
+            <div class="indicator">
+                <span class="dot" id="serverDot"></span>
+                <span id="serverLabel">Offline</span>
+            </div>
+            <div class="indicator">
+                <span id="faceCount">0 faces</span>
+            </div>
+        </div>
+
+        <div class="camera-container" id="cameraBox">
+            <img src="/video_feed" alt="Camera Feed" />
+        </div>
+
+        <div class="status-banner status-idle" id="statusBanner">
+            {{ 'Step up to clock in' if kiosk_type == 'entry' else 'Step up to clock out' }}
+        </div>
+        <div class="sub-text" id="subText">{{ kiosk_name }}</div>
+
+        <div style="margin-top: 24px;">
+            <button onclick="showManual()" style="background:none;border:1px solid #555;color:#666;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:0.8em;">
+                Manual Clock
+            </button>
+        </div>
+    </div>
+
+    <div class="footer">
+        FW Attendance Kiosk v1.0 — {{ kiosk_name }} ({{ kiosk_type }})
+    </div>
+
+    <div class="manual-overlay" id="manualOverlay">
+        <div style="font-size:1.4em;margin-bottom:20px;color:#B8860B;">Manual Clock {{ 'In' if kiosk_type == 'entry' else 'Out' }}</div>
+        <input type="text" id="manualName" placeholder="Enter your name" autocomplete="off" />
+        <div style="margin-top:16px;">
+            <button class="btn-submit" onclick="submitManual()">Submit</button>
+            <button class="btn-cancel" onclick="hideManual()">Cancel</button>
+        </div>
+        <div id="manualResult" style="margin-top:16px;font-size:1.1em;"></div>
+    </div>
+
+    <script>
+        const idleMsg = '{{ "Step up to clock in" if kiosk_type == "entry" else "Step up to clock out" }}';
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clockDisplay').textContent = now.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+            document.getElementById('dateDisplay').textContent = now.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric', year:'numeric'});
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        function pollStatus() {
+            fetch('/status')
+                .then(r => r.json())
+                .then(data => {
+                    const banner = document.getElementById('statusBanner');
+                    const camera = document.getElementById('cameraBox');
+                    const sub = document.getElementById('subText');
+                    const serverDot = document.getElementById('serverDot');
+                    const serverLabel = document.getElementById('serverLabel');
+                    const faceCount = document.getElementById('faceCount');
+
+                    // Server indicator
+                    serverDot.className = 'dot ' + (data.server_online ? 'online' : 'offline');
+                    serverLabel.textContent = data.server_online ? 'Online' : 'Offline';
+                    faceCount.textContent = data.known_faces + ' faces';
+
+                    // Status banner
+                    banner.className = 'status-banner';
+                    camera.className = 'camera-container';
+
+                    if (data.status === 'recognized') {
+                        if (data.message && data.message.includes('Already')) {
+                            banner.classList.add('status-already');
+                        } else {
+                            banner.classList.add('status-recognized');
+                        }
+                        banner.textContent = data.message || ('Welcome, ' + data.worker_name + '!');
+                        camera.classList.add('recognized');
+                        sub.textContent = data.event_type === 'clock_in' ? 'Clocked In' : 'Clocked Out';
+                    } else if (data.status === 'unknown') {
+                        banner.classList.add('status-unknown');
+                        banner.textContent = data.message || 'Not recognized — please see your supervisor';
+                        camera.classList.add('unknown');
+                        sub.textContent = '';
+                    } else if (data.status === 'error') {
+                        banner.classList.add('status-error');
+                        banner.textContent = data.message || 'System error';
+                        sub.textContent = '';
+                    } else {
+                        banner.classList.add('status-idle');
+                        banner.textContent = idleMsg;
+                        sub.textContent = data.kiosk_name || '';
+                    }
+                })
+                .catch(() => {});
+        }
+        setInterval(pollStatus, 500);
+
+        function showManual() {
+            document.getElementById('manualOverlay').classList.add('active');
+            document.getElementById('manualName').value = '';
+            document.getElementById('manualResult').textContent = '';
+            document.getElementById('manualName').focus();
+        }
+
+        function hideManual() {
+            document.getElementById('manualOverlay').classList.remove('active');
+        }
+
+        function submitManual() {
+            const name = document.getElementById('manualName').value.trim();
+            if (!name) return;
+            fetch('/manual_clock', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: name})
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('manualResult').innerHTML = '<span style="color:#4CAF50;">✓ ' + data.name + ' clocked ' + (data.event_type === 'clock_in' ? 'in' : 'out') + '</span>';
+                    setTimeout(hideManual, 2000);
+                } else {
+                    document.getElementById('manualResult').innerHTML = '<span style="color:#f44336;">Error: ' + (data.error || 'Unknown') + '</span>';
+                }
+            })
+            .catch(() => {
+                document.getElementById('manualResult').innerHTML = '<span style="color:#f44336;">Connection error</span>';
+            });
+        }
+
+        document.getElementById('manualName').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') submitManual();
+        });
+    </script>
+</body>
+</html>
