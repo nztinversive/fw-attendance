@@ -1,10 +1,13 @@
-"""SQLite database manager for FW Attendance Kiosk."""
+"""SQLite database manager for FW Attendance kiosk."""
+
+from __future__ import annotations
 
 import json
 import logging
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -12,164 +15,419 @@ import numpy as np
 import config
 
 logger = logging.getLogger(__name__)
-
 _local = threading.local()
 
 
+def _serialize_encoding(encoding: np.ndarray) -> bytes:
+    return np.asarray(encoding, dtype=np.float64).tobytes()
+
+
+def _deserialize_encoding(raw_value) -> np.ndarray:
+    if raw_value is None:
+        return np.array([], dtype=np.float64)
+    if isinstance(raw_value, (bytes, bytearray, memoryview)):
+        return np.frombuffer(raw_value, dtype=np.float64)
+    if isinstance(raw_value, str):
+        # Backward compatibility with older JSON-text schema.
+        return np.array(json.loads(raw_value), dtype=np.float64)
+    raise ValueError(f"Unsupported encoding format: {type(raw_value)!r}")
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str):
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+        logger.info("Added column %s.%s", table, column)
+
+
 def _get_conn() -> sqlite3.Connection:
-    """Get a thread-local database connection."""
+    """Get a thread-local SQLite connection."""
     if not hasattr(_local, "conn") or _local.conn is None:
-        _local.conn = sqlite3.connect(config.DB_PATH)
+        db_path = Path(config.DB_PATH)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        _local.conn = sqlite3.connect(str(db_path), check_same_thread=False)
         _local.conn.row_factory = sqlite3.Row
         _local.conn.execute("PRAGMA journal_mode=WAL")
-        _local.conn.execute("PRAGMA foreign_keys=ON")
+        _local.conn.execute("PRAGMA foreign_keys=OFF")
     return _local.conn
 
 
 def init_db():
-    """Create tables if they don't exist."""
+    """Create and migrate required tables."""
     conn = _get_conn()
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE IF NOT EXISTS workers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            face_encoding TEXT NOT NULL,
-            photo_path TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            synced_at TEXT
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            encoding_blob BLOB NOT NULL,
+            enrolled_at TEXT NOT NULL DEFAULT (datetime('now')),
+            photo_count INTEGER NOT NULL DEFAULT 0,
+            photo_paths TEXT NOT NULL DEFAULT '[]'
         );
 
         CREATE TABLE IF NOT EXISTS attendance_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             worker_id INTEGER NOT NULL,
             worker_name TEXT NOT NULL,
-            event_type TEXT NOT NULL CHECK(event_type IN ('clock_in', 'clock_out')),
+            action TEXT NOT NULL CHECK(action IN ('clock_in', 'clock_out')),
             timestamp TEXT NOT NULL DEFAULT (datetime('now')),
-            confidence REAL,
-            kiosk_id TEXT NOT NULL,
+            liveness_confirmed INTEGER NOT NULL DEFAULT 0,
+            confidence REAL NOT NULL DEFAULT 0.0,
+            kiosk_id TEXT NOT NULL DEFAULT '',
             synced INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (worker_id) REFERENCES workers(id)
+            note TEXT
         );
 
         CREATE TABLE IF NOT EXISTS sync_state (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            last_sync TEXT
         );
-    """)
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_worker_time ON attendance_log(worker_id, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance_log(timestamp);
+        """
+    )
+
+    # Migration support for previous schema versions.
+    _ensure_column(conn, "workers", "encoding_blob", "encoding_blob BLOB")
+    _ensure_column(conn, "workers", "enrolled_at", "enrolled_at TEXT DEFAULT (datetime('now'))")
+    _ensure_column(conn, "workers", "photo_count", "photo_count INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "workers", "photo_paths", "photo_paths TEXT NOT NULL DEFAULT '[]'")
+
+    _ensure_column(
+        conn,
+        "attendance_log",
+        "action",
+        "action TEXT CHECK(action IN ('clock_in', 'clock_out')) DEFAULT 'clock_in'",
+    )
+    _ensure_column(conn, "attendance_log", "liveness_confirmed", "liveness_confirmed INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "attendance_log", "confidence", "confidence REAL NOT NULL DEFAULT 0.0")
+    _ensure_column(conn, "attendance_log", "kiosk_id", "kiosk_id TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "attendance_log", "synced", "synced INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "attendance_log", "note", "note TEXT")
+
+    worker_columns = {row["name"] for row in conn.execute("PRAGMA table_info(workers)").fetchall()}
+    if "face_encoding" in worker_columns:
+        rows = conn.execute(
+            "SELECT id, face_encoding, encoding_blob FROM workers WHERE encoding_blob IS NULL OR length(encoding_blob) = 0"
+        ).fetchall()
+        for row in rows:
+            old_value = row["face_encoding"]
+            if old_value is None:
+                continue
+            try:
+                converted = _serialize_encoding(np.array(json.loads(old_value), dtype=np.float64))
+            except (json.JSONDecodeError, ValueError, TypeError):
+                continue
+            conn.execute("UPDATE workers SET encoding_blob = ? WHERE id = ?", (converted, row["id"]))
+
+    # Copy old attendance event_type to action if needed.
+    attendance_columns = {row["name"] for row in conn.execute("PRAGMA table_info(attendance_log)").fetchall()}
+    if "event_type" in attendance_columns:
+        conn.execute("UPDATE attendance_log SET action = event_type WHERE action IS NULL OR action = ''")
+
+    conn.execute("INSERT OR IGNORE INTO sync_state (id, last_sync) VALUES (1, NULL)")
     conn.commit()
     logger.info("Database initialized at %s", config.DB_PATH)
 
 
-def add_worker(name: str, encoding: np.ndarray, photo_path: Optional[str] = None) -> int:
-    """Add a worker with their face encoding. Returns worker ID."""
+def add_worker(
+    name: str,
+    encoding: np.ndarray,
+    photo_paths: Optional[list[str]] = None,
+    enrolled_at: Optional[str] = None,
+) -> int:
+    """Insert or update a worker and return worker id."""
     conn = _get_conn()
-    encoding_json = json.dumps(encoding.tolist())
-    cursor = conn.execute(
-        "INSERT INTO workers (name, face_encoding, photo_path) VALUES (?, ?, ?)",
-        (name, encoding_json, photo_path),
-    )
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("Worker name is required.")
+
+    photo_paths = photo_paths or []
+    payload_blob = _serialize_encoding(encoding)
+    photo_paths_json = json.dumps(photo_paths)
+    enrolled_at = enrolled_at or datetime.now().isoformat(timespec="seconds")
+
+    row = conn.execute("SELECT id FROM workers WHERE lower(name) = lower(?)", (normalized_name,)).fetchone()
+    if row:
+        worker_id = int(row["id"])
+        conn.execute(
+            """
+            UPDATE workers
+            SET name = ?, encoding_blob = ?, enrolled_at = ?, photo_count = ?, photo_paths = ?
+            WHERE id = ?
+            """,
+            (normalized_name, payload_blob, enrolled_at, len(photo_paths), photo_paths_json, worker_id),
+        )
+    else:
+        cursor = conn.execute(
+            """
+            INSERT INTO workers (name, encoding_blob, enrolled_at, photo_count, photo_paths)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (normalized_name, payload_blob, enrolled_at, len(photo_paths), photo_paths_json),
+        )
+        worker_id = int(cursor.lastrowid)
+
     conn.commit()
-    worker_id = cursor.lastrowid
-    logger.info("Added worker: %s (id=%d)", name, worker_id)
+    logger.info("Saved worker: %s (id=%d)", normalized_name, worker_id)
     return worker_id
 
 
-def get_all_workers() -> list[dict]:
-    """Return all workers as dicts."""
+def remove_worker(name: str) -> bool:
+    """Remove a worker by case-insensitive name."""
     conn = _get_conn()
-    rows = conn.execute("SELECT id, name, face_encoding, photo_path, synced_at FROM workers").fetchall()
+    cursor = conn.execute("DELETE FROM workers WHERE lower(name) = lower(?)", (name.strip(),))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def get_worker_by_name(name: str) -> Optional[dict]:
+    """Fetch worker by name (case-insensitive)."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT id, name, encoding_blob, enrolled_at, photo_count, photo_paths FROM workers WHERE lower(name)=lower(?)",
+        (name.strip(),),
+    ).fetchone()
+    if not row:
+        return None
+    encoding = _deserialize_encoding(row["encoding_blob"])
+    return {
+        "id": int(row["id"]),
+        "name": row["name"],
+        "encoding_blob": encoding,
+        "face_encoding": encoding,  # backward-compatible alias
+        "enrolled_at": row["enrolled_at"],
+        "photo_count": int(row["photo_count"] or 0),
+        "photo_paths": json.loads(row["photo_paths"] or "[]"),
+    }
+
+
+def get_all_workers() -> list[dict]:
+    """Return all workers with decoded encodings."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, name, encoding_blob, enrolled_at, photo_count, photo_paths FROM workers ORDER BY name ASC"
+    ).fetchall()
     workers = []
     for row in rows:
-        workers.append({
-            "id": row["id"],
-            "name": row["name"],
-            "face_encoding": np.array(json.loads(row["face_encoding"]), dtype=np.float64),
-            "photo_path": row["photo_path"],
-            "synced_at": row["synced_at"],
-        })
+        encoding = _deserialize_encoding(row["encoding_blob"])
+        workers.append(
+            {
+                "id": int(row["id"]),
+                "name": row["name"],
+                "encoding_blob": encoding,
+                "face_encoding": encoding,  # backward-compatible alias
+                "enrolled_at": row["enrolled_at"],
+                "photo_count": int(row["photo_count"] or 0),
+                "photo_paths": json.loads(row["photo_paths"] or "[]"),
+            }
+        )
     return workers
 
 
-def get_worker_encodings() -> tuple[list[np.ndarray], list[int], list[str]]:
-    """Return (encodings, ids, names) for all workers."""
+def list_workers() -> list[dict]:
+    """Worker list with enrollment metadata only."""
     workers = get_all_workers()
-    encodings = [w["face_encoding"] for w in workers]
-    ids = [w["id"] for w in workers]
-    names = [w["name"] for w in workers]
+    return [
+        {
+            "id": worker["id"],
+            "name": worker["name"],
+            "enrolled_at": worker["enrolled_at"],
+            "photo_count": worker["photo_count"],
+            "photo_paths": worker["photo_paths"],
+        }
+        for worker in workers
+    ]
+
+
+def get_worker_encodings() -> tuple[list[np.ndarray], list[int], list[str]]:
+    """Return tuples of encodings, ids, and names."""
+    workers = get_all_workers()
+    encodings = [worker["encoding_blob"] for worker in workers]
+    ids = [worker["id"] for worker in workers]
+    names = [worker["name"] for worker in workers]
     return encodings, ids, names
 
 
-def log_attendance(worker_id: int, worker_name: str, event_type: str, confidence: float = 0.0) -> int:
-    """Log an attendance event. Returns log ID."""
+def _normalize_action(action: str) -> str:
+    value = action.strip().lower()
+    if value not in {"clock_in", "clock_out"}:
+        raise ValueError("action must be 'clock_in' or 'clock_out'")
+    return value
+
+
+def log_attendance(
+    worker_id: int,
+    worker_name: str,
+    action: str,
+    liveness_confirmed: bool = False,
+    confidence: float = 0.0,
+    timestamp: Optional[str] = None,
+    note: Optional[str] = None,
+) -> int:
+    """Create an attendance log entry and return log id."""
     conn = _get_conn()
-    now = datetime.now().isoformat()
+    normalized_action = _normalize_action(action)
+    timestamp = timestamp or datetime.now().isoformat(timespec="seconds")
     cursor = conn.execute(
-        "INSERT INTO attendance_log (worker_id, worker_name, event_type, timestamp, confidence, kiosk_id) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (worker_id, worker_name, event_type, now, confidence, config.KIOSK_ID),
+        """
+        INSERT INTO attendance_log
+            (worker_id, worker_name, action, timestamp, liveness_confirmed, confidence, kiosk_id, synced, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        """,
+        (
+            int(worker_id),
+            worker_name,
+            normalized_action,
+            timestamp,
+            1 if liveness_confirmed else 0,
+            float(confidence),
+            config.KIOSK_ID,
+            note,
+        ),
     )
     conn.commit()
-    log_id = cursor.lastrowid
-    logger.info("Attendance logged: %s %s (id=%d, confidence=%.2f)", worker_name, event_type, log_id, confidence)
+    log_id = int(cursor.lastrowid)
+    logger.info(
+        "Attendance logged: worker=%s action=%s confidence=%.3f live=%s",
+        worker_name,
+        normalized_action,
+        confidence,
+        liveness_confirmed,
+    )
     return log_id
 
 
-def get_unsynced_logs() -> list[dict]:
-    """Return all unsynced attendance logs."""
+def was_recently_clocked(worker_id: int, minutes: int) -> bool:
+    """Return True if worker has any recent clock event within N minutes."""
+    conn = _get_conn()
+    threshold = (datetime.now() - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    row = conn.execute(
+        """
+        SELECT id FROM attendance_log
+        WHERE worker_id = ? AND timestamp >= ?
+        ORDER BY timestamp DESC LIMIT 1
+        """,
+        (worker_id, threshold),
+    ).fetchone()
+    return row is not None
+
+
+def get_last_action(worker_id: int) -> Optional[str]:
+    """Return last clock action for a worker."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT action FROM attendance_log WHERE worker_id = ? ORDER BY timestamp DESC LIMIT 1",
+        (worker_id,),
+    ).fetchone()
+    return row["action"] if row else None
+
+
+def get_today_logs(limit: int = 50) -> list[dict]:
+    """Return today's attendance activity."""
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT id, worker_id, worker_name, event_type, timestamp, confidence, kiosk_id "
-        "FROM attendance_log WHERE synced = 0"
+        """
+        SELECT id, worker_id, worker_name, action, timestamp, liveness_confirmed, confidence, note
+        FROM attendance_log
+        WHERE date(timestamp) = date('now', 'localtime')
+        ORDER BY timestamp DESC
+        LIMIT ?
+        """,
+        (limit,),
     ).fetchall()
-    return [dict(row) for row in rows]
+    logs: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        item["liveness_confirmed"] = bool(item["liveness_confirmed"])
+        item["event_type"] = item["action"]  # backward-compatible alias
+        logs.append(item)
+    return logs
+
+
+def get_unsynced_logs() -> list[dict]:
+    """Return unsynced attendance logs for optional server sync."""
+    conn = _get_conn()
+    rows = conn.execute(
+        """
+        SELECT id, worker_id, worker_name, action, timestamp, liveness_confirmed, confidence, kiosk_id, note
+        FROM attendance_log
+        WHERE synced = 0
+        ORDER BY id ASC
+        """
+    ).fetchall()
+    logs = []
+    for row in rows:
+        item = dict(row)
+        item["event_type"] = item["action"]  # compatibility with older sync payloads
+        logs.append(item)
+    return logs
 
 
 def mark_synced(log_ids: list[int]):
-    """Mark attendance logs as synced."""
+    """Mark selected attendance logs as synced."""
     if not log_ids:
         return
     conn = _get_conn()
     placeholders = ",".join("?" for _ in log_ids)
     conn.execute(f"UPDATE attendance_log SET synced = 1 WHERE id IN ({placeholders})", log_ids)
     conn.commit()
-    logger.info("Marked %d logs as synced", len(log_ids))
 
 
-def get_sync_state(key: str) -> Optional[str]:
-    """Get a sync state value."""
+def get_sync_state(key: str = "last_sync") -> Optional[str]:
+    """Get the last sync timestamp."""
+    del key  # retained for compatibility with prior key/value API
     conn = _get_conn()
-    row = conn.execute("SELECT value FROM sync_state WHERE key = ?", (key,)).fetchone()
-    return row["value"] if row else None
+    row = conn.execute("SELECT last_sync FROM sync_state WHERE id = 1").fetchone()
+    return row["last_sync"] if row else None
 
 
 def set_sync_state(key: str, value: str):
-    """Set a sync state value."""
+    """Set the last sync timestamp."""
+    del key  # retained for compatibility with prior key/value API
     conn = _get_conn()
-    conn.execute(
-        "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?, ?)",
-        (key, value),
-    )
+    conn.execute("INSERT OR REPLACE INTO sync_state (id, last_sync) VALUES (1, ?)", (value,))
     conn.commit()
 
 
-def get_recent_clock(worker_id: int, minutes: int = 5) -> Optional[dict]:
-    """Check if worker clocked in/out within last N minutes."""
+def auto_clockout_overdue(hours: int) -> list[int]:
+    """Auto clock-out workers with stale open shifts older than N hours."""
     conn = _get_conn()
-    row = conn.execute(
-        "SELECT * FROM attendance_log WHERE worker_id = ? "
-        "AND timestamp > datetime('now', ? || ' minutes') ORDER BY timestamp DESC LIMIT 1",
-        (worker_id, f"-{minutes}"),
-    ).fetchone()
-    return dict(row) if row else None
-
-
-def get_today_logs(limit: int = 50) -> list[dict]:
-    """Get today's attendance logs."""
-    conn = _get_conn()
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
     rows = conn.execute(
-        "SELECT id, worker_id, worker_name, event_type, timestamp, confidence "
-        "FROM attendance_log WHERE date(timestamp) = date('now') "
-        "ORDER BY timestamp DESC LIMIT ?",
-        (limit,),
+        """
+        SELECT ci.worker_id, ci.worker_name, MAX(ci.timestamp) AS last_clock_in
+        FROM attendance_log ci
+        WHERE ci.action = 'clock_in' AND ci.worker_id > 0
+        GROUP BY ci.worker_id, ci.worker_name
+        HAVING last_clock_in <= ?
+           AND NOT EXISTS (
+               SELECT 1 FROM attendance_log co
+               WHERE co.worker_id = ci.worker_id
+                 AND co.action = 'clock_out'
+                 AND co.timestamp > last_clock_in
+           )
+        """,
+        (cutoff,),
     ).fetchall()
-    return [dict(row) for row in rows]
+
+    inserted: list[int] = []
+    for row in rows:
+        cursor = conn.execute(
+            """
+            INSERT INTO attendance_log
+                (worker_id, worker_name, action, timestamp, liveness_confirmed, confidence, kiosk_id, synced, note)
+            VALUES (?, ?, 'clock_out', ?, 1, 1.0, ?, 0, 'auto_clockout')
+            """,
+            (
+                int(row["worker_id"]),
+                row["worker_name"],
+                datetime.now().isoformat(timespec="seconds"),
+                config.KIOSK_ID,
+            ),
+        )
+        inserted.append(int(cursor.lastrowid))
+    conn.commit()
+    return inserted

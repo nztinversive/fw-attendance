@@ -1,10 +1,12 @@
-"""Flask web app for FW Attendance Kiosk touchscreen UI."""
+"""Flask web UI for the FW Attendance Pi kiosk."""
 
-import json
+from __future__ import annotations
+
 import logging
 import threading
 import time
 from datetime import datetime
+from typing import Optional
 
 import cv2
 from flask import Flask, Response, jsonify, render_template, request
@@ -13,134 +15,166 @@ import config
 import database
 
 logger = logging.getLogger(__name__)
-
 app = Flask(__name__)
 
-# Shared state (set by kiosk.py main loop)
-_state_lock = threading.Lock()
-_current_state = {
-    "status": "idle",  # idle, recognized, unknown, error
-    "worker_name": None,
-    "event_type": None,
-    "message": "",
-    "timestamp": None,
-    "server_online": False,
-    "known_faces": 0,
-}
-
-# Camera frame shared with main loop
 _frame_lock = threading.Lock()
 _current_frame = None
 
+_status_lock = threading.Lock()
+_status = {
+    "state": "IDLE",
+    "message": "Step toward camera",
+    "worker_name": None,
+    "action": None,
+    "confidence": 0.0,
+    "liveness_confirmed": False,
+    "ear": 0.0,
+    "face_detected": False,
+    "face_count": 0,
+    "known_workers": 0,
+    "timestamp": None,
+}
 
-def update_state(status: str, worker_name: str = None, event_type: str = None,
-                 message: str = "", server_online: bool = False, known_faces: int = 0):
-    """Update the shared UI state."""
-    with _state_lock:
-        _current_state["status"] = status
-        _current_state["worker_name"] = worker_name
-        _current_state["event_type"] = event_type
-        _current_state["message"] = message
-        _current_state["timestamp"] = datetime.now().isoformat()
-        _current_state["server_online"] = server_online
-        _current_state["known_faces"] = known_faces
+_server_thread = None
 
 
 def set_frame(frame):
-    """Update the current camera frame for MJPEG streaming."""
+    """Set the latest frame used by MJPEG feed."""
     global _current_frame
     with _frame_lock:
-        _current_frame = frame
+        _current_frame = frame.copy() if frame is not None else None
 
 
-def _generate_frames():
-    """Generator that yields MJPEG frames."""
+def update_status(**kwargs):
+    """Update shared status fields."""
+    with _status_lock:
+        _status.update(kwargs)
+        _status["timestamp"] = datetime.now().isoformat(timespec="seconds")
+
+
+def get_status_snapshot() -> dict:
+    """Get current status plus metadata used by the frontend."""
+    with _status_lock:
+        data = dict(_status)
+
+    workers = database.list_workers()
+    data["kiosk_id"] = config.KIOSK_ID
+    data["kiosk_name"] = config.KIOSK_NAME
+    data["kiosk_type"] = config.KIOSK_TYPE
+    data["server_time"] = datetime.now().isoformat(timespec="seconds")
+    data["admin"] = {
+        "worker_count": len(workers),
+        "total_photos": sum(worker["photo_count"] for worker in workers),
+        "workers": workers,
+    }
+    return data
+
+
+def _mjpeg_stream():
     while True:
         with _frame_lock:
             frame = _current_frame
         if frame is not None:
-            ret, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            if ret:
+            ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            if ok:
                 yield (
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n"
                 )
-        time.sleep(0.05)  # ~20 FPS max
+        time.sleep(0.05)
+
+
+def _manual_action_for_worker(worker_id: int) -> str:
+    if config.KIOSK_TYPE == "entry":
+        return "clock_in"
+    if config.KIOSK_TYPE == "exit":
+        return "clock_out"
+    last = database.get_last_action(worker_id)
+    return "clock_out" if last == "clock_in" else "clock_in"
 
 
 @app.route("/")
 def index():
-    """Main kiosk view."""
-    return render_template("index.html", kiosk_type=config.KIOSK_TYPE, kiosk_name=config.KIOSK_NAME)
+    return render_template("index.html", kiosk_name=config.KIOSK_NAME, kiosk_type=config.KIOSK_TYPE)
+
+
+@app.route("/feed")
+def feed():
+    return Response(_mjpeg_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.route("/video_feed")
-def video_feed():
-    """MJPEG video stream."""
-    return Response(_generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
+def video_feed_alias():
+    return feed()
 
 
 @app.route("/status")
 def status():
-    """JSON current state."""
-    with _state_lock:
-        state = dict(_current_state)
-    state["kiosk_type"] = config.KIOSK_TYPE
-    state["kiosk_name"] = config.KIOSK_NAME
-    state["kiosk_id"] = config.KIOSK_ID
-    return jsonify(state)
+    return jsonify(get_status_snapshot())
 
 
-@app.route("/manual_clock", methods=["POST"])
-def manual_clock():
-    """Manual clock-in/out by name (fallback)."""
-    data = request.get_json()
-    if not data or "name" not in data:
-        return jsonify({"error": "Name required"}), 400
-
-    name = data["name"].strip()
-    if not name:
-        return jsonify({"error": "Name required"}), 400
-
-    event_type = "clock_in" if config.KIOSK_TYPE == "entry" else "clock_out"
-
-    # Find worker by name
-    workers = database.get_all_workers()
-    worker = next((w for w in workers if w["name"].lower() == name.lower()), None)
-
-    if worker:
-        worker_id = worker["id"]
-    else:
-        # Log with id=0 for unknown manual entries
-        worker_id = 0
-
-    database.log_attendance(worker_id, name, event_type, confidence=0.0)
-    update_state("recognized", worker_name=name, event_type=event_type,
-                 message=f"Manual {event_type.replace('_', ' ')} for {name}")
-
-    return jsonify({"success": True, "name": name, "event_type": event_type})
+@app.route("/log")
+def today_log():
+    return jsonify(database.get_today_logs(limit=100))
 
 
 @app.route("/today")
-def today():
-    """Today's attendance log."""
-    logs = database.get_today_logs()
-    return jsonify(logs)
+def today_log_alias():
+    return today_log()
+
+
+@app.route("/manual-clock", methods=["POST"])
+@app.route("/manual_clock", methods=["POST"])
+def manual_clock():
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    if not name:
+        return jsonify({"success": False, "error": "Name is required"}), 400
+
+    worker = database.get_worker_by_name(name)
+    if worker is None:
+        return jsonify({"success": False, "error": "Worker not found"}), 404
+
+    action = payload.get("action")
+    if action not in {"clock_in", "clock_out"}:
+        action = _manual_action_for_worker(worker["id"])
+
+    log_id = database.log_attendance(
+        worker_id=worker["id"],
+        worker_name=worker["name"],
+        action=action,
+        liveness_confirmed=False,
+        confidence=1.0,
+        note="manual_clock",
+    )
+    action_label = "Clocked in" if action == "clock_in" else "Clocked out"
+    update_status(
+        state="CLOCKED_IN",
+        message=f"{action_label}: {worker['name']}",
+        worker_name=worker["name"],
+        action=action,
+        liveness_confirmed=False,
+        confidence=1.0,
+    )
+    return jsonify({"success": True, "log_id": log_id, "worker_name": worker["name"], "action": action})
 
 
 def start_server():
-    """Start Flask server in a background thread."""
-    thread = threading.Thread(
-        target=lambda: app.run(
+    """Run Flask app in a background daemon thread."""
+    global _server_thread
+    if _server_thread and _server_thread.is_alive():
+        return _server_thread
+
+    def _serve():
+        app.run(
             host=config.FLASK_HOST,
-            port=config.FLASK_PORT,
+            port=config.KIOSK_PORT,
             debug=False,
             use_reloader=False,
             threaded=True,
-        ),
-        daemon=True,
-        name="flask-server",
-    )
-    thread.start()
-    logger.info("Flask server started on %s:%d", config.FLASK_HOST, config.FLASK_PORT)
-    return thread
+        )
+
+    _server_thread = threading.Thread(target=_serve, daemon=True, name="kiosk-web")
+    _server_thread.start()
+    logger.info("Web UI started at http://%s:%d", config.FLASK_HOST, config.KIOSK_PORT)
+    return _server_thread

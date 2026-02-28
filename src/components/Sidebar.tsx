@@ -7,6 +7,7 @@ const links = [
   { href: '/', label: 'Dashboard', icon: '📊' },
   { href: '/log', label: 'Log', icon: '📋' },
   { href: '/workers', label: 'Workers', icon: '👷' },
+  { href: '/enroll', label: 'Enroll Face', icon: '🧑‍💻' },
   { href: '/kiosks', label: 'Kiosks', icon: '🖥️' },
   { href: '/reports', label: 'Reports', icon: '📈' },
 ];

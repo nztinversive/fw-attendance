@@ -3,340 +3,506 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FW Attendance</title>
+    <title>FW Attendance Kiosk</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-0: #0c0c0d;
+            --bg-1: #151618;
+            --bg-2: #1d1f23;
+            --ink: #f4f2ef;
+            --muted: #9ea1a8;
+            --gold: #b8860b;
+            --ok: #2fa36b;
+            --warn: #bf4934;
+            --line: #2f3238;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
         body {
-            background: #1a1a1a;
-            color: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            height: 100vh;
-            width: 100vw;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
+            min-height: 100vh;
+            background:
+                radial-gradient(1200px 500px at 90% -20%, rgba(184, 134, 11, 0.18), transparent 60%),
+                radial-gradient(800px 400px at -10% 120%, rgba(184, 134, 11, 0.12), transparent 70%),
+                var(--bg-0);
+            color: var(--ink);
+            font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
         }
 
         .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px 24px;
-            background: #111;
-            border-bottom: 2px solid #B8860B;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--line);
+            background: rgba(12, 12, 13, 0.85);
+            backdrop-filter: blur(4px);
         }
-        .header .logo {
-            font-size: 1.4em;
+
+        .title {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .title h1 {
+            font-size: 1.4rem;
+            letter-spacing: 0.08rem;
+            color: var(--gold);
             font-weight: 700;
-            color: #B8860B;
+            text-transform: uppercase;
         }
-        .header .clock {
-            font-size: 1.6em;
-            font-weight: 300;
+
+        .title p {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .clock-wrap {
+            text-align: right;
             font-variant-numeric: tabular-nums;
         }
-        .header .date {
-            font-size: 0.9em;
-            color: #888;
+
+        .clock {
+            font-size: 2rem;
+            font-weight: 600;
+            line-height: 1;
+        }
+
+        .date {
+            color: var(--muted);
+            font-size: 0.95rem;
+            margin-top: 4px;
         }
 
         .main {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            position: relative;
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 16px;
+            padding: 16px;
+            min-height: 0;
         }
 
-        .camera-container {
-            width: 480px;
-            height: 360px;
+        .stage {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+            border: 1px solid var(--line);
             border-radius: 16px;
-            overflow: hidden;
-            border: 3px solid #333;
-            background: #000;
-            transition: border-color 0.3s;
+            padding: 16px;
+            display: grid;
+            grid-template-rows: 1fr auto;
+            gap: 16px;
+            min-height: 0;
         }
-        .camera-container.recognized { border-color: #4CAF50; }
-        .camera-container.unknown { border-color: #f44336; }
 
-        .camera-container img {
+        .camera-box {
+            border: 2px solid #3a3d43;
+            border-radius: 14px;
+            overflow: hidden;
+            background: #000;
+            min-height: 280px;
+        }
+
+        .camera-box img {
             width: 100%;
             height: 100%;
             object-fit: cover;
+            display: block;
         }
 
-        .status-banner {
-            margin-top: 24px;
-            padding: 20px 40px;
+        .status-card {
+            background: var(--bg-2);
+            border: 1px solid var(--line);
+            border-left: 5px solid var(--gold);
             border-radius: 12px;
-            font-size: 1.6em;
-            font-weight: 600;
-            text-align: center;
-            min-width: 480px;
-            transition: all 0.3s ease;
+            padding: 16px;
         }
 
-        .status-idle {
-            background: #2a2a2a;
-            color: #B8860B;
-            border: 2px solid #B8860B;
-        }
-        .status-recognized {
-            background: #1b5e20;
-            color: #fff;
-            border: 2px solid #4CAF50;
-        }
-        .status-already {
-            background: #1a3a5c;
-            color: #90CAF9;
-            border: 2px solid #42A5F5;
-        }
-        .status-unknown {
-            background: #b71c1c;
-            color: #fff;
-            border: 2px solid #f44336;
-        }
-        .status-error {
-            background: #4a1010;
-            color: #ff8a80;
-            border: 2px solid #ff5252;
+        .status-label {
+            color: var(--muted);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06rem;
         }
 
-        .sub-text {
+        .status-text {
             margin-top: 8px;
-            font-size: 0.85em;
-            color: #aaa;
-            text-align: center;
+            font-size: clamp(1.2rem, 2.6vw, 2.1rem);
+            font-weight: 700;
+            line-height: 1.2;
         }
 
-        .indicators {
-            position: absolute;
-            top: 12px;
-            right: 16px;
+        .status-meta {
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 0.95rem;
             display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .side {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
             gap: 12px;
+            min-height: 0;
+        }
+
+        .side h2 {
+            color: var(--gold);
+            font-size: 1rem;
+            letter-spacing: 0.04rem;
+            text-transform: uppercase;
+        }
+
+        .manual {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+        }
+
+        .manual input {
+            background: #0f1114;
+            border: 1px solid var(--line);
+            color: var(--ink);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 0.95rem;
+        }
+
+        .manual button,
+        .admin-toggle {
+            border: 1px solid #6d5520;
+            background: rgba(184, 134, 11, 0.14);
+            color: #f0d18b;
+            border-radius: 8px;
+            padding: 9px 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .admin-toggle {
+            width: 100%;
+        }
+
+        .manual-result {
+            min-height: 22px;
+            font-size: 0.9rem;
+        }
+
+        .log-list {
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            overflow: auto;
+            background: #0f1114;
+            min-height: 0;
+        }
+
+        .log-item {
+            padding: 10px;
+            border-bottom: 1px solid #22252a;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 10px;
+            font-size: 0.9rem;
             align-items: center;
         }
-        .indicator {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.8em;
-            color: #888;
+
+        .log-item:last-child {
+            border-bottom: none;
         }
-        .dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
+
+        .pill {
+            font-size: 0.75rem;
+            border-radius: 999px;
+            padding: 2px 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.03rem;
         }
-        .dot.online { background: #4CAF50; }
-        .dot.offline { background: #ff9800; }
+
+        .pill.clock_in {
+            background: rgba(47, 163, 107, 0.2);
+            color: #87dfb3;
+        }
+
+        .pill.clock_out {
+            background: rgba(191, 73, 52, 0.2);
+            color: #ff9e8f;
+        }
+
+        .admin-panel {
+            display: none;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 10px;
+            background: #0f1114;
+            max-height: 220px;
+            overflow: auto;
+            font-size: 0.88rem;
+        }
+
+        .admin-panel.active {
+            display: block;
+        }
+
+        .worker-row {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px solid #22252a;
+        }
+
+        .worker-row:last-child {
+            border-bottom: none;
+        }
 
         .footer {
-            padding: 8px 24px;
-            background: #111;
-            text-align: center;
-            font-size: 0.75em;
-            color: #555;
-            border-top: 1px solid #333;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 0.85rem;
+            padding: 10px 16px;
+            display: flex;
+            justify-content: space-between;
+            background: rgba(12, 12, 13, 0.85);
         }
 
-        /* Manual clock overlay */
-        .manual-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85);
-            z-index: 100;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-        }
-        .manual-overlay.active { display: flex; }
-        .manual-overlay input {
-            font-size: 1.4em;
-            padding: 12px 24px;
-            border-radius: 8px;
-            border: 2px solid #B8860B;
-            background: #222;
-            color: #fff;
-            text-align: center;
-            width: 300px;
-            outline: none;
-        }
-        .manual-overlay button {
-            margin-top: 16px;
-            font-size: 1.2em;
-            padding: 10px 32px;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            font-weight: 600;
-        }
-        .manual-overlay .btn-submit {
-            background: #B8860B;
-            color: #fff;
-        }
-        .manual-overlay .btn-cancel {
-            background: #444;
-            color: #fff;
-            margin-left: 12px;
-        }
+        @media (max-width: 900px) {
+            .main {
+                grid-template-columns: 1fr;
+            }
 
-        @media (max-width: 600px) {
-            .camera-container { width: 320px; height: 240px; }
-            .status-banner { min-width: 320px; font-size: 1.2em; padding: 14px 20px; }
+            .clock {
+                font-size: 1.5rem;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <div>
-            <div class="logo">⚡ FW Attendance</div>
-            <div class="date" id="dateDisplay"></div>
+    <header class="header">
+        <div class="title">
+            <h1>FW Attendance</h1>
+            <p id="kioskName">{{ kiosk_name }} ({{ kiosk_type }})</p>
         </div>
-        <div class="clock" id="clockDisplay"></div>
-    </div>
+        <div class="clock-wrap">
+            <div id="clock" class="clock">--:--:--</div>
+            <div id="date" class="date">-----</div>
+        </div>
+    </header>
 
-    <div class="main">
-        <div class="indicators">
-            <div class="indicator">
-                <span class="dot" id="serverDot"></span>
-                <span id="serverLabel">Offline</span>
+    <main class="main">
+        <section class="stage">
+            <div class="camera-box">
+                <img src="/feed" alt="Live camera feed">
             </div>
-            <div class="indicator">
-                <span id="faceCount">0 faces</span>
+            <div class="status-card">
+                <div class="status-label">Live Status</div>
+                <div id="statusText" class="status-text">Step toward camera</div>
+                <div class="status-meta">
+                    <span id="stateValue">State: IDLE</span>
+                    <span id="earValue">EAR: 0.00</span>
+                    <span id="knownValue">Workers: 0</span>
+                    <span id="liveValue">Liveness: No</span>
+                </div>
             </div>
-        </div>
+        </section>
 
-        <div class="camera-container" id="cameraBox">
-            <img src="/video_feed" alt="Camera Feed" />
-        </div>
+        <aside class="side">
+            <h2>Manual Clock</h2>
+            <div class="manual">
+                <input id="manualName" type="text" placeholder="Worker name">
+                <button id="manualBtn">Submit</button>
+            </div>
+            <div id="manualResult" class="manual-result"></div>
 
-        <div class="status-banner status-idle" id="statusBanner">
-            {{ 'Step up to clock in' if kiosk_type == 'entry' else 'Step up to clock out' }}
-        </div>
-        <div class="sub-text" id="subText">{{ kiosk_name }}</div>
+            <button id="adminToggle" class="admin-toggle">Admin Mode (A)</button>
+            <div id="adminPanel" class="admin-panel"></div>
 
-        <div style="margin-top: 24px;">
-            <button onclick="showManual()" style="background:none;border:1px solid #555;color:#666;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:0.8em;">
-                Manual Clock
-            </button>
-        </div>
-    </div>
+            <h2>Today Log</h2>
+            <div id="logList" class="log-list"></div>
+        </aside>
+    </main>
 
-    <div class="footer">
-        FW Attendance Kiosk v1.0 — {{ kiosk_name }} ({{ kiosk_type }})
-    </div>
-
-    <div class="manual-overlay" id="manualOverlay">
-        <div style="font-size:1.4em;margin-bottom:20px;color:#B8860B;">Manual Clock {{ 'In' if kiosk_type == 'entry' else 'Out' }}</div>
-        <input type="text" id="manualName" placeholder="Enter your name" autocomplete="off" />
-        <div style="margin-top:16px;">
-            <button class="btn-submit" onclick="submitManual()">Submit</button>
-            <button class="btn-cancel" onclick="hideManual()">Cancel</button>
-        </div>
-        <div id="manualResult" style="margin-top:16px;font-size:1.1em;"></div>
-    </div>
+    <footer class="footer">
+        <span>Blink verification required before recognition</span>
+        <span id="lastUpdated">Last update: --</span>
+    </footer>
 
     <script>
-        const idleMsg = '{{ "Step up to clock in" if kiosk_type == "entry" else "Step up to clock out" }}';
+        const statusText = document.getElementById("statusText");
+        const stateValue = document.getElementById("stateValue");
+        const earValue = document.getElementById("earValue");
+        const knownValue = document.getElementById("knownValue");
+        const liveValue = document.getElementById("liveValue");
+        const logList = document.getElementById("logList");
+        const manualBtn = document.getElementById("manualBtn");
+        const manualName = document.getElementById("manualName");
+        const manualResult = document.getElementById("manualResult");
+        const adminToggle = document.getElementById("adminToggle");
+        const adminPanel = document.getElementById("adminPanel");
+        const lastUpdated = document.getElementById("lastUpdated");
+        let adminVisible = false;
 
-        function updateClock() {
+        function tickClock() {
             const now = new Date();
-            document.getElementById('clockDisplay').textContent = now.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-            document.getElementById('dateDisplay').textContent = now.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric', year:'numeric'});
-        }
-        setInterval(updateClock, 1000);
-        updateClock();
-
-        function pollStatus() {
-            fetch('/status')
-                .then(r => r.json())
-                .then(data => {
-                    const banner = document.getElementById('statusBanner');
-                    const camera = document.getElementById('cameraBox');
-                    const sub = document.getElementById('subText');
-                    const serverDot = document.getElementById('serverDot');
-                    const serverLabel = document.getElementById('serverLabel');
-                    const faceCount = document.getElementById('faceCount');
-
-                    // Server indicator
-                    serverDot.className = 'dot ' + (data.server_online ? 'online' : 'offline');
-                    serverLabel.textContent = data.server_online ? 'Online' : 'Offline';
-                    faceCount.textContent = data.known_faces + ' faces';
-
-                    // Status banner
-                    banner.className = 'status-banner';
-                    camera.className = 'camera-container';
-
-                    if (data.status === 'recognized') {
-                        if (data.message && data.message.includes('Already')) {
-                            banner.classList.add('status-already');
-                        } else {
-                            banner.classList.add('status-recognized');
-                        }
-                        banner.textContent = data.message || ('Welcome, ' + data.worker_name + '!');
-                        camera.classList.add('recognized');
-                        sub.textContent = data.event_type === 'clock_in' ? 'Clocked In' : 'Clocked Out';
-                    } else if (data.status === 'unknown') {
-                        banner.classList.add('status-unknown');
-                        banner.textContent = data.message || 'Not recognized — please see your supervisor';
-                        camera.classList.add('unknown');
-                        sub.textContent = '';
-                    } else if (data.status === 'error') {
-                        banner.classList.add('status-error');
-                        banner.textContent = data.message || 'System error';
-                        sub.textContent = '';
-                    } else {
-                        banner.classList.add('status-idle');
-                        banner.textContent = idleMsg;
-                        sub.textContent = data.kiosk_name || '';
-                    }
-                })
-                .catch(() => {});
-        }
-        setInterval(pollStatus, 500);
-
-        function showManual() {
-            document.getElementById('manualOverlay').classList.add('active');
-            document.getElementById('manualName').value = '';
-            document.getElementById('manualResult').textContent = '';
-            document.getElementById('manualName').focus();
-        }
-
-        function hideManual() {
-            document.getElementById('manualOverlay').classList.remove('active');
-        }
-
-        function submitManual() {
-            const name = document.getElementById('manualName').value.trim();
-            if (!name) return;
-            fetch('/manual_clock', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name: name})
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    document.getElementById('manualResult').innerHTML = '<span style="color:#4CAF50;">✓ ' + data.name + ' clocked ' + (data.event_type === 'clock_in' ? 'in' : 'out') + '</span>';
-                    setTimeout(hideManual, 2000);
-                } else {
-                    document.getElementById('manualResult').innerHTML = '<span style="color:#f44336;">Error: ' + (data.error || 'Unknown') + '</span>';
-                }
-            })
-            .catch(() => {
-                document.getElementById('manualResult').innerHTML = '<span style="color:#f44336;">Connection error</span>';
+            document.getElementById("clock").textContent = now.toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: true
+            });
+            document.getElementById("date").textContent = now.toLocaleDateString("en-US", {
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+                year: "numeric"
             });
         }
 
-        document.getElementById('manualName').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') submitManual();
+        function statusMessageFromState(state, message, name, action) {
+            if (message) return message;
+            if (state === "WAITING_FOR_BLINK") return "Blink to verify";
+            if (state === "FACE_DETECTED") return "Face detected";
+            if (state === "MATCHED") return name ? `Welcome, ${name}!` : "Face matched";
+            if (state === "CLOCKED_IN") {
+                if (!name) return "Attendance recorded";
+                const actionLabel = action === "clock_out" ? "Clocked out" : "Clocked in";
+                return `${actionLabel}: ${name}`;
+            }
+            return "Step toward camera";
+        }
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch("/status", { cache: "no-store" });
+                const data = await response.json();
+                const msg = statusMessageFromState(
+                    data.state,
+                    data.message,
+                    data.worker_name,
+                    data.action
+                );
+                statusText.textContent = msg;
+                stateValue.textContent = `State: ${data.state || "IDLE"}`;
+                earValue.textContent = `EAR: ${Number(data.ear || 0).toFixed(2)}`;
+                knownValue.textContent = `Workers: ${data.known_workers || 0}`;
+                liveValue.textContent = `Liveness: ${data.liveness_confirmed ? "Yes" : "No"}`;
+                lastUpdated.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+
+                if (adminVisible) {
+                    renderAdmin(data.admin || { workers: [], worker_count: 0, total_photos: 0 });
+                }
+            } catch (error) {
+                statusText.textContent = "Status unavailable";
+            }
+        }
+
+        function renderAdmin(admin) {
+            const workers = admin.workers || [];
+            const rows = workers.slice(0, 30).map((worker) => {
+                return `
+                    <div class="worker-row">
+                        <span>${worker.name}</span>
+                        <span>${worker.photo_count} photos</span>
+                        <span>#${worker.id}</span>
+                    </div>
+                `;
+            }).join("");
+            adminPanel.innerHTML = `
+                <div style="margin-bottom:8px;color:#f0d18b;">
+                    Workers: ${admin.worker_count || 0} | Photos: ${admin.total_photos || 0}
+                </div>
+                ${rows || "<div>No workers enrolled.</div>"}
+            `;
+        }
+
+        async function fetchLog() {
+            try {
+                const response = await fetch("/log", { cache: "no-store" });
+                const logs = await response.json();
+                const rows = logs.slice(0, 18).map((item) => {
+                    const ts = new Date(item.timestamp);
+                    const time = isNaN(ts.getTime()) ? item.timestamp : ts.toLocaleTimeString("en-US", {
+                        hour: "2-digit",
+                        minute: "2-digit"
+                    });
+                    return `
+                        <div class="log-item">
+                            <span class="pill ${item.action}">${item.action.replace("_", " ")}</span>
+                            <span>${item.worker_name}</span>
+                            <span>${time}</span>
+                        </div>
+                    `;
+                }).join("");
+                logList.innerHTML = rows || `<div class="log-item"><span>No activity today.</span></div>`;
+            } catch (error) {
+                logList.innerHTML = `<div class="log-item"><span>Unable to load logs.</span></div>`;
+            }
+        }
+
+        async function submitManualClock() {
+            const name = manualName.value.trim();
+            if (!name) {
+                manualResult.textContent = "Enter a worker name.";
+                manualResult.style.color = "#ff9e8f";
+                return;
+            }
+            manualResult.textContent = "Submitting...";
+            manualResult.style.color = "#9ea1a8";
+            try {
+                const response = await fetch("/manual-clock", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    manualResult.textContent = data.error || "Manual clock failed.";
+                    manualResult.style.color = "#ff9e8f";
+                    return;
+                }
+                manualResult.textContent = `${data.worker_name}: ${data.action.replace("_", " ")}`;
+                manualResult.style.color = "#87dfb3";
+                manualName.value = "";
+                fetchLog();
+            } catch (error) {
+                manualResult.textContent = "Connection error.";
+                manualResult.style.color = "#ff9e8f";
+            }
+        }
+
+        adminToggle.addEventListener("click", () => {
+            adminVisible = !adminVisible;
+            adminPanel.classList.toggle("active", adminVisible);
         });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key.toLowerCase() === "a") {
+                adminVisible = !adminVisible;
+                adminPanel.classList.toggle("active", adminVisible);
+            }
+            if (event.key === "Enter" && document.activeElement === manualName) {
+                submitManualClock();
+            }
+        });
+
+        manualBtn.addEventListener("click", submitManualClock);
+
+        tickClock();
+        setInterval(tickClock, 1000);
+        fetchStatus();
+        fetchLog();
+        setInterval(fetchStatus, 500);
+        setInterval(fetchLog, 4000);
     </script>
 </body>
 </html>
