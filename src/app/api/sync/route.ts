@@ -12,10 +12,15 @@ export async function GET(req: NextRequest) {
   // Update kiosk last_sync
   db.prepare('UPDATE kiosks SET last_sync = ? WHERE id = ?').run(new Date().toISOString(), kioskId);
 
-  // Return workers updated since timestamp
-  const workers = db.prepare(
+  // Return workers — parse face_encoding from JSON string to array for Pi consumption
+  const rawWorkers = db.prepare(
     'SELECT id, name, department, photo_url, face_encoding, enrolled_at, active FROM workers WHERE enrolled_at > ? OR active = 1'
-  ).all(since);
+  ).all(since) as Array<{ id: string; name: string; department: string; photo_url: string | null; face_encoding: string | null; enrolled_at: string; active: number }>;
+
+  const workers = rawWorkers.map((w) => ({
+    ...w,
+    face_encoding: w.face_encoding ? JSON.parse(w.face_encoding) : null,
+  }));
 
   return NextResponse.json({ workers, synced_at: new Date().toISOString() });
 }
