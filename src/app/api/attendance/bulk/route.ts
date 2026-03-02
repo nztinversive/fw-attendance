@@ -13,17 +13,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'events (or logs) array required' }, { status: 400 });
   }
 
-  // Ensure worker_name column exists (Pi kiosk sends it)
-  try {
-    db.exec('ALTER TABLE attendance ADD COLUMN worker_name TEXT DEFAULT ""');
-  } catch { /* column already exists */ }
-  try {
-    db.exec('ALTER TABLE attendance ADD COLUMN confidence REAL DEFAULT 0.0');
-  } catch { /* column already exists */ }
-  try {
-    db.exec('ALTER TABLE attendance ADD COLUMN liveness_confirmed INTEGER DEFAULT 0');
-  } catch { /* column already exists */ }
-
   const insert = db.prepare(
     'INSERT OR IGNORE INTO attendance (id, worker_id, event_type, kiosk_id, timestamp, synced, worker_name, confidence, liveness_confirmed) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)'
   );

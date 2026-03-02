@@ -35,7 +35,9 @@ export function getDb(): Database.Database {
       kiosk_id TEXT,
       timestamp TEXT NOT NULL,
       synced INTEGER DEFAULT 0,
-      FOREIGN KEY (worker_id) REFERENCES workers(id)
+      worker_name TEXT DEFAULT '',
+      confidence REAL DEFAULT 0.0,
+      liveness_confirmed INTEGER DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS kiosks (
       id TEXT PRIMARY KEY,

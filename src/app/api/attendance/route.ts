@@ -9,9 +9,9 @@ export async function GET(req: NextRequest) {
   const workerId = req.nextUrl.searchParams.get('worker_id');
 
   let sql = `
-    SELECT a.*, w.name as worker_name, w.department as worker_department, k.name as kiosk_name
+    SELECT a.*, COALESCE(w.name, a.worker_name) as worker_name, w.department as worker_department, k.name as kiosk_name
     FROM attendance a
-    JOIN workers w ON a.worker_id = w.id
+    LEFT JOIN workers w ON a.worker_id = w.id
     LEFT JOIN kiosks k ON a.kiosk_id = k.id
     WHERE a.timestamp LIKE ?
   `;
