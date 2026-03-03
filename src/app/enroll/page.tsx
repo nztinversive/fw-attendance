@@ -20,6 +20,10 @@ export default function EnrollPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nameRef = useRef(name);
+  const departmentRef = useRef(department);
+  nameRef.current = name;
+  departmentRef.current = department;
 
   const stopCamera = useCallback(() => {
     if (captureTimerRef.current) {
@@ -106,8 +110,8 @@ export default function EnrollPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: name.trim(),
-          department: department.trim(),
+          name: nameRef.current.trim(),
+          department: departmentRef.current.trim(),
           photos: capturedPhotos,
         }),
       });
