@@ -1,78 +1,121 @@
-# FW Attendance — Pi Kiosk Setup
+# FW Attendance — Pi Kiosk Face Scanner
 
-Turn a Raspberry Pi 3 Model B into a dedicated attendance kiosk.
+Raspberry Pi 3B face recognition kiosk for factory building access control.
+
+## How It Works
+
+1. Camera captures faces continuously
+2. Matches against enrolled worker face encodings (stored locally)
+3. Shows ✅ Welcome or ❌ Not Recognized
+4. Logs attendance locally (works **offline** — no WiFi required)
+5. Syncs attendance records to server every 5 minutes when WiFi is available
 
 ## What You Need
 
-- Raspberry Pi 3 Model B (or any Pi with WiFi)
+- Raspberry Pi 3 Model B (or newer)
+- Pi Camera Module v2 (or USB webcam)
 - microSD card (16GB+) with [Raspberry Pi OS Lite](https://www.raspberrypi.com/software/)
-- 7" touchscreen or HDMI display
+- Display (HDMI or 7" touchscreen)
 - USB power supply (5V 2.5A minimum)
-- WiFi connection
 
-## Quick Setup
+## Setup
 
-1. **Flash Raspberry Pi OS Lite** (64-bit recommended) to your SD card using [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-   - In imager settings: enable SSH, set WiFi credentials, set hostname to `fw-kiosk`
+### 1. Flash Raspberry Pi OS
 
-2. **Boot the Pi**, SSH in:
-   ```bash
-   ssh pi@fw-kiosk.local
-   ```
+Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/) to flash **Raspberry Pi OS Lite (64-bit)**.
 
-3. **Run the setup script:**
-   ```bash
-   sudo bash -c "$(curl -sSL https://raw.githubusercontent.com/nztinversive/fw-attendance/master/pi-kiosk/setup.sh)"
-   ```
+In imager settings:
+- Enable SSH
+- Set WiFi credentials
+- Set hostname to `fw-kiosk`
 
-4. **Reboot:**
-   ```bash
-   sudo reboot
-   ```
+### 2. Boot & SSH In
 
-The Pi will boot directly into fullscreen Chromium showing the attendance app.
+```bash
+ssh pi@fw-kiosk.local
+```
+
+### 3. Run Setup Script
+
+```bash
+curl -sSL https://raw.githubusercontent.com/nztinversive/fw-attendance/master/pi-kiosk/setup.sh -o setup.sh
+sudo chmod +x setup.sh
+sudo KIOSK_URL=https://fw-attendance.onrender.com ./setup.sh
+```
+
+### 4. Enroll Workers
+
+On the web app (https://fw-attendance.onrender.com):
+1. Go to **Enroll Face**
+2. Enter worker name + department
+3. Capture 3 photos from webcam
+4. Photos are encoded into face vectors
+
+### 5. Reboot the Pi
+
+```bash
+sudo reboot
+```
+
+The Pi boots directly into the face scanner. It syncs worker encodings from the server on startup, then runs face matching locally.
+
+## Offline Mode
+
+The kiosk works **without internet** after the initial sync:
+
+- Worker face encodings are cached in `~/fw-kiosk/data/encodings.json`
+- Attendance scans are logged to `~/fw-kiosk/data/attendance_offline.json`
+- When WiFi reconnects, pending records sync to the server automatically
 
 ## Configuration
 
-### Change the URL
-Edit `~/kiosk-chromium.sh` and update the URL at the bottom.
+### Environment Variables
 
-### Screen Rotation
-Run setup with rotation:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KIOSK_URL` | `https://fw-attendance.onrender.com` | Server URL |
+| `KIOSK_ID` | `kiosk-1` | Unique kiosk identifier |
+
+### Command Line
+
 ```bash
-ROTATE=left sudo ./setup.sh    # 90° counterclockwise
-ROTATE=right sudo ./setup.sh   # 90° clockwise
-ROTATE=inverted sudo ./setup.sh # 180°
+python3 kiosk.py --server URL --kiosk-id ID --camera [auto|pi|usb] --threshold 0.6
 ```
 
-### Custom URL
-```bash
-KIOSK_URL=https://your-custom-url.com sudo ./setup.sh
-```
+- `--threshold`: Face match distance (0-1). Lower = stricter. Default 0.6.
+- `--camera`: `pi` for Pi Camera, `usb` for USB webcam, `auto` to try both.
+
+## Performance on Pi 3B
+
+- Face detection: ~2-3 seconds per frame (HOG model)
+- Face matching: <0.5 seconds against 50 workers
+- Total scan time: ~3-4 seconds
+
+For faster detection, use a Pi 4 (~1 second total).
 
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| Black screen after boot | SSH in, check `~/kiosk.sh` is executable |
-| Chromium crashes | Pi 3B has 1GB RAM — close any other processes |
-| Touchscreen not responding | Check ribbon cable (official 7" display) or USB touch cable |
-| WiFi drops | Add `wifi_country=US` to `/boot/config.txt` |
-| Screen stays on forever | That's by design — disable with `xset +dpms` in kiosk.sh |
+| "No camera available" | Check `vcgencmd get_camera` (Pi) or `lsusb` (USB) |
+| "No enrolled workers found" | Enroll faces on the web app first, ensure WiFi for initial sync |
+| Slow face detection | Normal for Pi 3B — HOG model is CPU-only |
+| False rejections | Lower threshold: `--threshold 0.7` |
+| False matches | Raise threshold: `--threshold 0.5` |
+| Camera permission denied | Run `sudo raspi-config` → Interface → Camera → Enable |
 
-## Exit Kiosk Mode
+## Architecture
 
-SSH into the Pi and run:
-```bash
-sudo systemctl stop getty@tty1
 ```
-
-Or to permanently disable:
-```bash
-sudo rm /etc/systemd/system/getty@tty1.service.d/autologin.conf
-sudo reboot
+Pi 3B (Kiosk)                    Render (Server)
+┌─────────────┐                  ┌──────────────────┐
+│ Camera      │                  │ FW Attendance App │
+│ ↓           │   WiFi sync     │                   │
+│ face_rec    │ ←──────────────→ │ /api/workers      │
+│ (local)     │   (every 5min)  │ /api/attendance   │
+│ ↓           │                  │ /api/enroll       │
+│ Terminal UI │                  │                   │
+│ ↓           │                  │ face-service      │
+│ Local Log   │                  │ (encode only)     │
+└─────────────┘                  └──────────────────┘
 ```
-
-## Phase 2: Face Recognition
-
-The Pi 3B works as a thin client — capture photos locally, send to `fw-attendance.onrender.com/api/face-match` for server-side matching. See `/api/face-match` route (not yet built) for the server endpoint spec.

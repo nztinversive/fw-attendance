@@ -1,284 +1,413 @@
-"""Main runtime loop for FW Attendance kiosk."""
+#!/usr/bin/env python3
+"""
+FW Attendance — Pi Kiosk Face Scanner
 
-from __future__ import annotations
+Runs locally on a Raspberry Pi 3B with camera.
+- Captures face from camera
+- Matches against locally cached worker encodings
+- Logs attendance (clock in/out) locally
+- Syncs with FW Attendance server when WiFi is available
 
-import logging
-import signal
+Usage:
+    python3 kiosk.py [--server URL] [--kiosk-id ID] [--camera usb|pi] [--threshold 0.6]
+"""
+
+import argparse
+import json
+import os
 import sys
 import time
-from datetime import datetime
+import io
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import cv2
+import numpy as np
+import face_recognition
+from PIL import Image
 
-import config
-import database
-from app import set_frame, start_server, update_status
-from recognition import FaceRecognizer
+# ─── Configuration ──────────────────────────────────────────────
+
+DATA_DIR = Path(__file__).parent / "data"
+ENCODINGS_FILE = DATA_DIR / "encodings.json"
+ATTENDANCE_LOG = DATA_DIR / "attendance_offline.json"
+CONFIG_FILE = DATA_DIR / "config.json"
+
+DEFAULT_SERVER = "https://fw-attendance.onrender.com"
+MATCH_THRESHOLD = 0.6
+CAPTURE_WIDTH = 640
+CAPTURE_HEIGHT = 480
+COOLDOWN_SECONDS = 30  # prevent duplicate scans
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
 )
-logger = logging.getLogger("kiosk")
+log = logging.getLogger("kiosk")
 
 
-class AttendanceKiosk:
-    """Kiosk state machine: IDLE -> FACE_DETECTED -> WAITING_FOR_BLINK -> MATCHED -> CLOCKED_IN."""
+# ─── Camera Abstraction ────────────────────────────────────────
 
-    def __init__(self):
-        self.recognizer = FaceRecognizer()
-        self.camera: Optional[cv2.VideoCapture] = None
-        self.running = False
-        self.state = "IDLE"
-        self._hold_state_until = 0.0
-        self._last_auto_clockout_check = 0.0
-        self._last_no_face_reset = 0.0
+class Camera:
+    """Abstract camera that works with Pi Camera or USB webcam."""
 
-    def _ensure_paths(self):
-        Path(config.DATA_DIR).mkdir(parents=True, exist_ok=True)
-        Path(config.FACES_DIR).mkdir(parents=True, exist_ok=True)
-        Path(config.MODEL_DIR).mkdir(parents=True, exist_ok=True)
-
-    def _set_state(
-        self,
-        state: str,
-        message: str,
-        worker_name: Optional[str] = None,
-        action: Optional[str] = None,
-        confidence: float = 0.0,
-        liveness_confirmed: bool = False,
-        face_detected: bool = False,
-    ):
-        self.state = state
-        update_status(
-            state=state,
-            message=message,
-            worker_name=worker_name,
-            action=action,
-            confidence=round(float(confidence), 3),
-            liveness_confirmed=bool(liveness_confirmed),
-            ear=round(float(self.recognizer.current_ear), 3),
-            face_detected=face_detected,
-            face_count=1 if face_detected else 0,
-            known_workers=self.recognizer.known_count,
-        )
+    def __init__(self, mode: str = "auto"):
+        self._cam = None
+        self._mode = mode
 
     def start(self):
-        self._ensure_paths()
-        database.init_db()
-        self.recognizer.load_faces()
+        if self._mode in ("pi", "auto"):
+            try:
+                from picamera2 import Picamera2
+                self._cam = Picamera2()
+                config = self._cam.create_still_configuration(
+                    main={"size": (CAPTURE_WIDTH, CAPTURE_HEIGHT), "format": "RGB888"}
+                )
+                self._cam.configure(config)
+                self._cam.start()
+                time.sleep(1)  # warm up
+                self._mode = "pi"
+                log.info("Pi Camera initialized")
+                return
+            except Exception as e:
+                if self._mode == "pi":
+                    raise RuntimeError(f"Pi Camera failed: {e}")
+                log.info(f"Pi Camera not available ({e}), trying USB...")
 
-        self.camera = cv2.VideoCapture(config.CAMERA_INDEX)
-        if not self.camera.isOpened():
-            raise RuntimeError(f"Unable to open camera index {config.CAMERA_INDEX}")
-        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
-        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
+        # USB webcam fallback via OpenCV
+        try:
+            import cv2
+            self._cam = cv2.VideoCapture(0)
+            self._cam.set(cv2.CAP_PROP_FRAME_WIDTH, CAPTURE_WIDTH)
+            self._cam.set(cv2.CAP_PROP_FRAME_HEIGHT, CAPTURE_HEIGHT)
+            if not self._cam.isOpened():
+                raise RuntimeError("USB camera not found")
+            self._mode = "usb"
+            log.info("USB Camera initialized")
+        except Exception as e:
+            raise RuntimeError(f"No camera available: {e}")
 
-        start_server()
-        self.running = True
-
-        if not self.recognizer.liveness_enabled:
-            self._set_state(
-                "WAITING_FOR_BLINK",
-                "Missing shape predictor model. Install data/models/shape_predictor_68_face_landmarks.dat",
-            )
+    def capture(self) -> np.ndarray:
+        """Capture a frame as RGB numpy array."""
+        if self._mode == "pi":
+            return self._cam.capture_array()
         else:
-            self._set_state("IDLE", "Step toward camera")
-
-        logger.info("Kiosk started on http://localhost:%d", config.KIOSK_PORT)
+            import cv2
+            ret, frame = self._cam.read()
+            if not ret:
+                raise RuntimeError("Failed to capture frame")
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
     def stop(self):
-        self.running = False
-        if self.camera and self.camera.isOpened():
-            self.camera.release()
-        logger.info("Kiosk stopped")
-
-    def _action_for_worker(self, worker_id: int) -> str:
-        if config.KIOSK_TYPE == "entry":
-            return "clock_in"
-        if config.KIOSK_TYPE == "exit":
-            return "clock_out"
-        last = database.get_last_action(worker_id)
-        return "clock_out" if last == "clock_in" else "clock_in"
-
-    def _auto_clockout_if_due(self):
-        now = time.monotonic()
-        if now - self._last_auto_clockout_check < 30:
+        if self._cam is None:
             return
-        self._last_auto_clockout_check = now
-        inserted = database.auto_clockout_overdue(config.AUTO_CLOCKOUT_HOURS)
-        if inserted:
-            logger.info("Auto clock-out inserted %d entries", len(inserted))
+        if self._mode == "pi":
+            self._cam.stop()
+        else:
+            self._cam.release()
 
-    def _draw_overlay(
-        self,
-        frame,
-        face_location: Optional[tuple[int, int, int, int]],
-        state_text: str,
-        message: str,
-        liveness_confirmed: bool,
-    ):
-        output = frame.copy()
-        if face_location is not None:
-            top, right, bottom, left = face_location
-            color = (0, 180, 255) if liveness_confirmed else (0, 120, 255)
-            cv2.rectangle(output, (left, top), (right, bottom), color, 2)
 
-        cv2.rectangle(output, (0, 0), (output.shape[1], 92), (12, 12, 12), -1)
-        cv2.putText(output, f"State: {state_text}", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (184, 134, 11), 2)
-        cv2.putText(output, f"EAR: {self.recognizer.current_ear:.2f}", (12, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (220, 220, 220), 2)
-        cv2.putText(output, message[:75], (12, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (220, 220, 220), 2)
-        return output
+# ─── Encoding Storage ──────────────────────────────────────────
 
-    def _handle_match(self, worker_name: str, confidence: float) -> tuple[bool, str, str]:
-        worker = database.get_worker_by_name(worker_name)
-        if worker is None:
-            return False, "clock_in", "Face matched but worker record is missing."
+class EncodingStore:
+    """Manages worker face encodings — syncs from server, caches locally."""
 
-        worker_id = worker["id"]
-        if database.was_recently_clocked(worker_id, config.CLOCK_DEBOUNCE_MINUTES):
-            return False, self._action_for_worker(worker_id), f"{worker_name} already clocked recently."
+    def __init__(self, server_url: str):
+        self.server_url = server_url.rstrip("/")
+        self.workers: dict[str, dict] = {}  # id -> {name, department, encoding}
+        self._load_cache()
 
-        action = self._action_for_worker(worker_id)
-        database.log_attendance(
-            worker_id=worker_id,
-            worker_name=worker_name,
-            action=action,
-            liveness_confirmed=True,
-            confidence=confidence,
-        )
-        at_time = datetime.now().strftime("%I:%M %p")
-        message = f"Clocked {'in' if action == 'clock_in' else 'out'} at {at_time}"
-        return True, action, message
+    def _load_cache(self):
+        if ENCODINGS_FILE.exists():
+            try:
+                data = json.loads(ENCODINGS_FILE.read_text())
+                self.workers = data.get("workers", {})
+                log.info(f"Loaded {len(self.workers)} cached worker encodings")
+            except Exception as e:
+                log.warning(f"Failed to load encoding cache: {e}")
 
-    def run(self):
-        self.start()
+    def _save_cache(self):
+        ENCODINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        ENCODINGS_FILE.write_text(json.dumps({
+            "workers": self.workers,
+            "last_sync": datetime.now(timezone.utc).isoformat(),
+        }, indent=2))
+
+    def sync(self) -> bool:
+        """Pull latest worker encodings from server. Returns True if successful."""
+        import requests
         try:
-            while self.running:
-                ret, frame = self.camera.read()
-                if not ret:
-                    time.sleep(0.1)
-                    continue
+            # Get all workers with encodings
+            res = requests.get(f"{self.server_url}/api/workers?include_encodings=true", timeout=10)
+            if res.status_code != 200:
+                log.warning(f"Sync failed: server returned {res.status_code}")
+                return False
 
-                self._auto_clockout_if_due()
+            workers_data = res.json()
+            synced = 0
+            for w in workers_data:
+                if w.get("face_encoding"):
+                    self.workers[w["id"]] = {
+                        "name": w["name"],
+                        "department": w.get("department", ""),
+                        "encoding": w["face_encoding"],
+                    }
+                    synced += 1
 
-                name, confidence, liveness_confirmed = self.recognizer.recognize_with_liveness(frame)
-                face_detected = self.recognizer.last_face_detected
-                face_location = self.recognizer.last_face_location
+            self._save_cache()
+            log.info(f"Synced {synced} worker encodings from server")
+            return True
 
-                message = "Step toward camera"
-                action = None
+        except requests.ConnectionError:
+            log.warning("Server unreachable — using cached encodings")
+            return False
+        except Exception as e:
+            log.warning(f"Sync error: {e}")
+            return False
 
-                if not face_detected:
-                    now = time.monotonic()
-                    if now - self._last_no_face_reset > 0.8:
-                        self.recognizer.reset_liveness()
-                        self._last_no_face_reset = now
-                    if time.monotonic() > self._hold_state_until:
-                        self._set_state("IDLE", "Step toward camera", face_detected=False)
-                    display = self._draw_overlay(frame, None, self.state, message, False)
-                    set_frame(display)
-                    time.sleep(0.03)
-                    continue
+    def match(self, face_encoding: np.ndarray, threshold: float = MATCH_THRESHOLD) -> Optional[dict]:
+        """Match a face encoding against known workers. Returns {id, name, confidence} or None."""
+        if not self.workers:
+            return None
 
-                if time.monotonic() < self._hold_state_until:
-                    display = self._draw_overlay(frame, face_location, self.state, _status_message(self.state), False)
-                    set_frame(display)
-                    time.sleep(0.03)
-                    continue
+        known_ids = []
+        known_encodings = []
+        for wid, data in self.workers.items():
+            enc = data.get("encoding")
+            if enc:
+                known_ids.append(wid)
+                known_encodings.append(np.array(enc))
 
-                if self.state == "IDLE":
-                    self._set_state("FACE_DETECTED", "Face detected", face_detected=True)
+        if not known_encodings:
+            return None
 
-                if not liveness_confirmed:
-                    self._set_state(
-                        "WAITING_FOR_BLINK",
-                        "Blink to verify",
-                        liveness_confirmed=False,
-                        face_detected=True,
-                    )
-                    message = "Blink to verify"
+        distances = face_recognition.face_distance(known_encodings, face_encoding)
+        best_idx = int(np.argmin(distances))
+        best_dist = distances[best_idx]
+
+        if best_dist > threshold:
+            return None
+
+        wid = known_ids[best_idx]
+        return {
+            "id": wid,
+            "name": self.workers[wid]["name"],
+            "department": self.workers[wid].get("department", ""),
+            "confidence": round(1.0 - best_dist, 4),
+        }
+
+
+# ─── Attendance Logger ─────────────────────────────────────────
+
+class AttendanceLogger:
+    """Logs attendance locally and syncs to server when possible."""
+
+    def __init__(self, server_url: str, kiosk_id: str):
+        self.server_url = server_url.rstrip("/")
+        self.kiosk_id = kiosk_id
+        self.pending: list[dict] = []
+        self._load_pending()
+        self._last_scan: dict[str, float] = {}  # worker_id -> timestamp
+
+    def _load_pending(self):
+        if ATTENDANCE_LOG.exists():
+            try:
+                self.pending = json.loads(ATTENDANCE_LOG.read_text())
+                if self.pending:
+                    log.info(f"{len(self.pending)} pending attendance records to sync")
+            except Exception:
+                self.pending = []
+
+    def _save_pending(self):
+        ATTENDANCE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        ATTENDANCE_LOG.write_text(json.dumps(self.pending, indent=2))
+
+    def is_cooldown(self, worker_id: str) -> bool:
+        """Check if worker was scanned recently (prevent duplicate scans)."""
+        last = self._last_scan.get(worker_id, 0)
+        return (time.time() - last) < COOLDOWN_SECONDS
+
+    def log_scan(self, worker_id: str, worker_name: str, confidence: float):
+        """Record a scan event."""
+        now = datetime.now(timezone.utc).isoformat()
+        self._last_scan[worker_id] = time.time()
+
+        record = {
+            "worker_id": worker_id,
+            "worker_name": worker_name,
+            "kiosk_id": self.kiosk_id,
+            "timestamp": now,
+            "confidence": confidence,
+        }
+        self.pending.append(record)
+        self._save_pending()
+        log.info(f"Logged: {worker_name} (confidence: {confidence})")
+
+    def sync(self) -> int:
+        """Push pending attendance records to server. Returns count synced."""
+        if not self.pending:
+            return 0
+
+        import requests
+        synced = 0
+        remaining = []
+
+        for record in self.pending:
+            try:
+                res = requests.post(
+                    f"{self.server_url}/api/attendance",
+                    json={
+                        "worker_id": record["worker_id"],
+                        "type": "clock_in",  # kiosk scans are clock-ins
+                        "kiosk_id": record["kiosk_id"],
+                        "timestamp": record["timestamp"],
+                    },
+                    timeout=10,
+                )
+                if res.status_code in (200, 201):
+                    synced += 1
                 else:
-                    if name:
-                        self._set_state(
-                            "MATCHED",
-                            f"Welcome, {name}!",
-                            worker_name=name,
-                            confidence=confidence,
-                            liveness_confirmed=True,
-                            face_detected=True,
-                        )
-                        ok, action, event_message = self._handle_match(name, confidence)
-                        if ok:
-                            self._set_state(
-                                "CLOCKED_IN",
-                                f"Welcome, {name}! {event_message}",
-                                worker_name=name,
-                                action=action,
-                                confidence=confidence,
-                                liveness_confirmed=True,
-                                face_detected=True,
-                            )
-                        else:
-                            self._set_state(
-                                "MATCHED",
-                                event_message,
-                                worker_name=name,
-                                action=action,
-                                confidence=confidence,
-                                liveness_confirmed=True,
-                                face_detected=True,
-                            )
-                        self._hold_state_until = time.monotonic() + config.DISPLAY_TIME_SEC
-                        self.recognizer.reset_liveness()
-                        message = event_message
-                    else:
-                        self._set_state(
-                            "WAITING_FOR_BLINK",
-                            "Live face detected, but not recognized.",
-                            liveness_confirmed=True,
-                            confidence=confidence,
-                            face_detected=True,
-                        )
-                        self._hold_state_until = time.monotonic() + 1.2
-                        self.recognizer.reset_liveness()
-                        message = "Live face detected, but not recognized."
+                    remaining.append(record)
+            except Exception:
+                remaining.append(record)
 
-                display = self._draw_overlay(frame, face_location, self.state, message, liveness_confirmed)
-                set_frame(display)
-                time.sleep(0.03)
-
-        except KeyboardInterrupt:
-            logger.info("Interrupted by user")
-        finally:
-            self.stop()
+        self.pending = remaining
+        self._save_pending()
+        if synced:
+            log.info(f"Synced {synced} attendance records to server")
+        return synced
 
 
-def _status_message(state: str) -> str:
-    if state == "WAITING_FOR_BLINK":
-        return "Blink to verify"
-    if state == "FACE_DETECTED":
-        return "Face detected"
-    if state == "MATCHED":
-        return "Face matched"
-    if state == "CLOCKED_IN":
-        return "Attendance recorded"
-    return "Step toward camera"
+# ─── Display (Terminal UI) ─────────────────────────────────────
+
+def clear_screen():
+    os.system("clear" if os.name != "nt" else "cls")
 
 
-def main():
-    kiosk = AttendanceKiosk()
+def show_status(message: str, color: str = "white"):
+    """Show a status message in the terminal (kiosk display)."""
+    colors = {
+        "green": "\033[92m",
+        "red": "\033[91m",
+        "gold": "\033[93m",
+        "white": "\033[97m",
+        "reset": "\033[0m",
+    }
+    c = colors.get(color, colors["white"])
+    r = colors["reset"]
+    clear_screen()
+    print(f"\n{'=' * 50}")
+    print(f"  {colors['gold']}FW{r} Attendance Kiosk")
+    print(f"{'=' * 50}")
+    print(f"\n  {c}{message}{r}\n")
+    print(f"{'=' * 50}")
 
-    def _handle_signal(_sig, _frame):
-        kiosk.running = False
 
-    signal.signal(signal.SIGINT, _handle_signal)
-    signal.signal(signal.SIGTERM, _handle_signal)
-    kiosk.run()
+# ─── Main Loop ─────────────────────────────────────────────────
+
+def run_kiosk(args):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    show_status("Starting up...", "gold")
+
+    # Init camera
+    camera = Camera(mode=args.camera)
+    try:
+        camera.start()
+    except RuntimeError as e:
+        show_status(f"Camera error: {e}", "red")
+        sys.exit(1)
+
+    # Init encoding store + attendance logger
+    store = EncodingStore(args.server)
+    logger = AttendanceLogger(args.server, args.kiosk_id)
+
+    # Initial sync
+    show_status("Syncing worker data...", "gold")
+    store.sync()
+    logger.sync()
+
+    if not store.workers:
+        show_status("No enrolled workers found!\nEnroll faces at the web app first.", "red")
+        time.sleep(5)
+
+    last_sync = time.time()
+    SYNC_INTERVAL = 300  # re-sync every 5 minutes
+
+    show_status("Ready — Look at the camera", "green")
+
+    try:
+        while True:
+            # Periodic sync
+            if time.time() - last_sync > SYNC_INTERVAL:
+                store.sync()
+                logger.sync()
+                last_sync = time.time()
+
+            # Capture frame
+            try:
+                frame = camera.capture()
+            except Exception as e:
+                log.error(f"Capture error: {e}")
+                time.sleep(1)
+                continue
+
+            # Detect faces
+            face_locations = face_recognition.face_locations(frame, model="hog")
+
+            if not face_locations:
+                show_status("Ready — Look at the camera", "green")
+                time.sleep(0.5)
+                continue
+
+            # Get encoding for the first/largest face
+            encodings = face_recognition.face_encodings(frame, face_locations)
+            if not encodings:
+                time.sleep(0.5)
+                continue
+
+            face_enc = encodings[0]
+
+            # Match against known workers
+            match = store.match(face_enc, threshold=args.threshold)
+
+            if match:
+                if logger.is_cooldown(match["id"]):
+                    show_status(
+                        f"✅ Welcome, {match['name']}!\n   Already scanned — please proceed.",
+                        "green"
+                    )
+                else:
+                    logger.log_scan(match["id"], match["name"], match["confidence"])
+                    show_status(
+                        f"✅ Welcome, {match['name']}!\n"
+                        f"   Department: {match['department']}\n"
+                        f"   Confidence: {match['confidence']:.0%}\n"
+                        f"   Time: {datetime.now().strftime('%I:%M %p')}",
+                        "green"
+                    )
+            else:
+                show_status("❌ Face not recognized\n   Please see a manager.", "red")
+
+            time.sleep(3)  # Show result for 3 seconds
+            show_status("Ready — Look at the camera", "green")
+
+    except KeyboardInterrupt:
+        log.info("Shutting down...")
+    finally:
+        camera.stop()
+        # Final sync attempt
+        logger.sync()
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="FW Attendance Pi Kiosk")
+    parser.add_argument("--server", default=DEFAULT_SERVER, help="FW Attendance server URL")
+    parser.add_argument("--kiosk-id", default="kiosk-1", help="Unique kiosk identifier")
+    parser.add_argument("--camera", choices=["auto", "pi", "usb"], default="auto", help="Camera type")
+    parser.add_argument("--threshold", type=float, default=MATCH_THRESHOLD, help="Face match threshold (0-1, lower=stricter)")
+
+    args = parser.parse_args()
+    run_kiosk(args)

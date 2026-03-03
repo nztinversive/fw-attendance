@@ -1,6 +1,5 @@
 face_recognition
-opencv-python
-flask
 numpy
-scipy
-dlib
+Pillow
+picamera2; platform_machine == "aarch64"
+requests
