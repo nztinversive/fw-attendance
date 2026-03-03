@@ -42,15 +42,22 @@ export default function EnrollPage() {
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      // Set step first so the <video> element renders, then assign stream
       setStep('camera');
     } catch {
       setErrorMsg('Camera access denied. Please allow camera permissions and try again.');
       setStep('error');
     }
   };
+
+  // Attach stream to video element whenever step changes to camera
+  useEffect(() => {
+    if (step === 'camera' || step === 'capturing') {
+      if (videoRef.current && streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+      }
+    }
+  }, [step]);
 
   const captureFrame = useCallback((): string | null => {
     if (!videoRef.current) return null;
