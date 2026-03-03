@@ -22,7 +22,7 @@ export default function Sidebar() {
       <aside className="hidden md:flex flex-col w-56 bg-gray-900 border-r border-gray-800 min-h-screen fixed left-0 top-0 z-30">
         <div className="p-4 border-b border-gray-800">
           <h1 className="text-xl font-bold">
-            <span className="text-gold">FW</span> Attendance
+            <span className="text-gold">FW</span> Gatekeeper
           </h1>
         </div>
         <nav className="flex-1 p-2 space-y-1">

@@ -1,4 +1,4 @@
-"""Server synchronization for FW Attendance Kiosk."""
+"""Server synchronization for FW Gatekeeper Kiosk."""
 
 import json
 import logging
@@ -27,7 +27,7 @@ def check_server() -> bool:
 
 
 def sync_attendance() -> bool:
-    """POST unsynced attendance logs to server. Returns True on success."""
+    """POST unsynced gatekeeper logs to server. Returns True on success."""
     logs = database.get_unsynced_logs()
     if not logs:
         return True
@@ -41,13 +41,13 @@ def sync_attendance() -> bool:
         if r.status_code == 200:
             log_ids = [log["id"] for log in logs]
             database.mark_synced(log_ids)
-            logger.info("Synced %d attendance logs to server", len(logs))
+            logger.info("Synced %d gatekeeper logs to server", len(logs))
             return True
         else:
-            logger.warning("Server returned %d during attendance sync", r.status_code)
+            logger.warning("Server returned %d during gatekeeper sync", r.status_code)
             return False
     except requests.RequestException as e:
-        logger.warning("Attendance sync failed: %s", e)
+        logger.warning("gatekeeper sync failed: %s", e)
         return False
 
 

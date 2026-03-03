@@ -1,4 +1,4 @@
-"""Face encoding/matching service for fw-attendance."""
+"""Face encoding/matching service for fw-gatekeeper."""
 
 import base64
 import io

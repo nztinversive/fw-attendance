@@ -1,4 +1,4 @@
-"""Flask web UI for the FW Attendance Pi kiosk."""
+"""Flask web UI for the FW Gatekeeper Pi kiosk."""
 
 from __future__ import annotations
 

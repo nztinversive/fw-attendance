@@ -1,6 +1,6 @@
 # Face Encoding Service
 
-FastAPI service for face encoding and matching, used by fw-attendance.
+FastAPI service for face encoding and matching, used by fw-gatekeeper.
 
 ## Endpoints
 

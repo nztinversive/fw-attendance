@@ -53,7 +53,7 @@ export const run = mutation({
       active: true,
     });
 
-    // Sample attendance
+    // Sample gatekeeper records
     const clockInTimes = ["05:52", "06:01", "05:48"];
     for (let i = 0; i < 3; i++) {
       await ctx.db.insert("attendance", {

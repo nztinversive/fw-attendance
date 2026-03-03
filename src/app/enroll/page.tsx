@@ -148,7 +148,7 @@ export default function EnrollPage() {
             <h1 className="text-3xl font-bold">
               <span className="text-gold">FW</span> Face Enrollment
             </h1>
-            <p className="text-gray-400 mt-2">Add a new team member to the attendance system</p>
+            <p className="text-gray-400 mt-2">Add a new team member to the gatekeeper system</p>
           </div>
 
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-4">

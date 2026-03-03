@@ -101,7 +101,7 @@ def main():
         # Face count
         cv2.putText(frame, f"Faces: {recognizer.known_count}", (10, 30), FONT, 0.6, GOLD, 1)
 
-        cv2.imshow("FW Attendance - Demo", frame)
+        cv2.imshow("FW Gatekeeper - Demo", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):

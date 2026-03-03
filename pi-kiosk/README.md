@@ -1,4 +1,4 @@
-# FW Attendance — Pi Kiosk Face Scanner
+# FW Gatekeeper — Pi Kiosk Face Scanner
 
 Raspberry Pi 3B face recognition kiosk for factory building access control.
 
@@ -7,8 +7,8 @@ Raspberry Pi 3B face recognition kiosk for factory building access control.
 1. Camera captures faces continuously
 2. Matches against enrolled worker face encodings (stored locally)
 3. Shows ✅ Welcome or ❌ Not Recognized
-4. Logs attendance locally (works **offline** — no WiFi required)
-5. Syncs attendance records to server every 5 minutes when WiFi is available
+4. Logs activity locally (works **offline** — no WiFi required)
+5. Syncs gatekeeper records to server every 5 minutes when WiFi is available
 
 ## What You Need
 
@@ -38,14 +38,14 @@ ssh pi@fw-kiosk.local
 ### 3. Run Setup Script
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/nztinversive/fw-attendance/master/pi-kiosk/setup.sh -o setup.sh
+curl -sSL https://raw.githubusercontent.com/nztinversive/fw-gatekeeper/master/pi-kiosk/setup.sh -o setup.sh
 sudo chmod +x setup.sh
-sudo KIOSK_URL=https://fw-attendance.onrender.com ./setup.sh
+sudo KIOSK_URL=https://fw-gatekeeper.onrender.com ./setup.sh
 ```
 
 ### 4. Enroll Workers
 
-On the web app (https://fw-attendance.onrender.com):
+On the web app (https://fw-gatekeeper.onrender.com):
 1. Go to **Enroll Face**
 2. Enter worker name + department
 3. Capture 3 photos from webcam
@@ -64,7 +64,7 @@ The Pi boots directly into the face scanner. It syncs worker encodings from the 
 The kiosk works **without internet** after the initial sync:
 
 - Worker face encodings are cached in `~/fw-kiosk/data/encodings.json`
-- Attendance scans are logged to `~/fw-kiosk/data/attendance_offline.json`
+- Gatekeeper scans are logged to `~/fw-kiosk/data/attendance_offline.json`
 - When WiFi reconnects, pending records sync to the server automatically
 
 ## Configuration
@@ -73,7 +73,7 @@ The kiosk works **without internet** after the initial sync:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KIOSK_URL` | `https://fw-attendance.onrender.com` | Server URL |
+| `KIOSK_URL` | `https://fw-gatekeeper.onrender.com` | Server URL |
 | `KIOSK_ID` | `kiosk-1` | Unique kiosk identifier |
 
 ### Command Line
@@ -109,7 +109,7 @@ For faster detection, use a Pi 4 (~1 second total).
 ```
 Pi 3B (Kiosk)                    Render (Server)
 ┌─────────────┐                  ┌──────────────────┐
-│ Camera      │                  │ FW Attendance App │
+│ Camera      │                  │ FW Gatekeeper App │
 │ ↓           │   WiFi sync     │                   │
 │ face_rec    │ ←──────────────→ │ /api/workers      │
 │ (local)     │   (every 5min)  │ /api/attendance   │

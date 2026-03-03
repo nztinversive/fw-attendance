@@ -175,7 +175,7 @@ export default function SchedulesPage() {
 
       {schedules.length === 0 ? (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
-          <p className="text-gray-500 text-sm">No schedules yet. Create one to enable daily attendance tracking.</p>
+          <p className="text-gray-500 text-sm">No schedules yet. Create one to enable daily tracking.</p>
         </div>
       ) : (
         <div className="space-y-3">

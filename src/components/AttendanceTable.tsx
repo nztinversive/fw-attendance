@@ -4,7 +4,7 @@ import { AttendanceWithWorker } from '@/lib/types';
 
 export default function AttendanceTable({ events }: { events: AttendanceWithWorker[] }) {
   if (events.length === 0) {
-    return <div className="text-gray-500 text-center py-8">No attendance records for this date.</div>;
+    return <div className="text-gray-500 text-center py-8">No records for this date.</div>;
   }
 
   return (

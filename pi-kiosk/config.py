@@ -1,9 +1,9 @@
-"""Configuration for FW Attendance Pi kiosk."""
+"""Configuration for FW Gatekeeper Pi kiosk."""
 
 from pathlib import Path
 
 # Server (optional if running fully offline)
-SERVER_URL = "https://fw-attendance.onrender.com"
+SERVER_URL = "https://fw-gatekeeper.onrender.com"
 SYNC_INTERVAL = 30  # seconds
 
 # Kiosk identity
@@ -22,7 +22,7 @@ LIVENESS_BLINK_FRAMES = 2
 LIVENESS_TIMEOUT_SEC = 5
 RECOGNITION_TOLERANCE = 0.5
 
-# Attendance behavior
+# Gatekeeper behavior
 CLOCK_DEBOUNCE_MINUTES = 5
 AUTO_CLOCKOUT_HOURS = 12
 DISPLAY_TIME_SEC = 3

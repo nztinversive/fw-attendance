@@ -30,7 +30,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     const fetchReport = async () => {
-      // Fetch attendance for each day in range
+      // Fetch gatekeeper data for each day in range
       const start = new Date(startDate);
       const end = new Date(endDate);
       const allEvents: { worker_id: string; worker_name: string; worker_department: string; event_type: string; timestamp: string }[] = [];
@@ -93,7 +93,7 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6"><span className="text-gold">Attendance</span> Reports</h1>
+      <h1 className="text-2xl font-bold mb-6"><span className="text-gold">Gatekeeper</span> Reports</h1>
 
       <div className="flex flex-wrap gap-3 mb-6 items-end">
         <div>
@@ -115,7 +115,7 @@ export default function ReportsPage() {
 
       {/* Weekly chart */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6">
-        <h2 className="text-sm font-medium text-gray-400 mb-3">Daily Attendance</h2>
+        <h2 className="text-sm font-medium text-gray-400 mb-3">Daily Activity</h2>
         <div className="h-48">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={dailyCounts}>

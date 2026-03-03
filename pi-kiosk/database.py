@@ -1,4 +1,4 @@
-"""SQLite database manager for FW Attendance kiosk."""
+"""SQLite database manager for FW Gatekeeper kiosk."""
 
 from __future__ import annotations
 
@@ -267,7 +267,7 @@ def log_attendance(
     timestamp: Optional[str] = None,
     note: Optional[str] = None,
 ) -> int:
-    """Create an attendance log entry and return log id."""
+    """Create a gatekeeper log entry and return log id."""
     conn = _get_conn()
     normalized_action = _normalize_action(action)
     timestamp = timestamp or datetime.now().isoformat(timespec="seconds")
@@ -291,7 +291,7 @@ def log_attendance(
     conn.commit()
     log_id = int(cursor.lastrowid)
     logger.info(
-        "Attendance logged: worker=%s action=%s confidence=%.3f live=%s",
+        "Gatekeeper logged: worker=%s action=%s confidence=%.3f live=%s",
         worker_name,
         normalized_action,
         confidence,
@@ -326,7 +326,7 @@ def get_last_action(worker_id: int) -> Optional[str]:
 
 
 def get_today_logs(limit: int = 50) -> list[dict]:
-    """Return today's attendance activity."""
+    """Return today's gatekeeper activity."""
     conn = _get_conn()
     rows = conn.execute(
         """
@@ -348,7 +348,7 @@ def get_today_logs(limit: int = 50) -> list[dict]:
 
 
 def get_unsynced_logs() -> list[dict]:
-    """Return unsynced attendance logs for optional server sync."""
+    """Return unsynced gatekeeper logs for optional server sync."""
     conn = _get_conn()
     rows = conn.execute(
         """
@@ -367,7 +367,7 @@ def get_unsynced_logs() -> list[dict]:
 
 
 def mark_synced(log_ids: list[int]):
-    """Mark selected attendance logs as synced."""
+    """Mark selected gatekeeper logs as synced."""
     if not log_ids:
         return
     conn = _get_conn()

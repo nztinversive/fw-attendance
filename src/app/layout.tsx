@@ -3,8 +3,8 @@ import './globals.css';
 import Sidebar from '@/components/Sidebar';
 
 export const metadata: Metadata = {
-  title: 'FW Attendance',
-  description: 'Fading West Factory Attendance System',
+  title: 'FW Gatekeeper',
+  description: 'Fading West Factory Gatekeeper System',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

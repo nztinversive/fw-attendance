@@ -11,7 +11,7 @@ export const get = query({
       .collect();
     const totalWorkers = allWorkers.length;
 
-    // Get today's attendance
+    // Get today's records
     const allAttendance = await ctx.db.query("attendance").collect();
     const todayAttendance = allAttendance.filter((a) => a.timestamp.startsWith(today));
 

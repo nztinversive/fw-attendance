@@ -1,7 +1,7 @@
-# Task: Build Full FW Attendance Pi Kiosk System
+# Task: Build Full FW Gatekeeper Pi Kiosk System
 
 ## Context
-This is a Raspberry Pi face recognition attendance kiosk. We have a working prototype with face detection confirmed. Now build the full system.
+This is a Raspberry Pi face recognition gatekeeper kiosk. We have a working prototype with face detection confirmed. Now build the full system.
 
 Existing files in this directory: config.py, database.py, recognition.py, sync.py, app.py, kiosk.py, demo.py, enroll.py, setup_pi.sh, templates/index.html, quick_test.py, requirements.txt
 
@@ -58,7 +58,7 @@ Browser-based kiosk display (like the quick_test.py but full featured):
 - Status display: "Step toward camera" → "Blink to verify" → "Welcome, [Name]!" → "Clocked in at [time]"
 - Gold (#B8860B) accent, dark theme, large text readable from 3 feet away
 - Show current time, date
-- Bottom bar: today's attendance log (who clocked in/out and when)
+- Bottom bar: today's activity log (who clocked in/out and when)
 - Admin mode (button/key): view all workers, enrollment stats
 - Endpoint: GET / (main UI), GET /feed (MJPEG stream), GET /status (JSON), GET /log (today's log), POST /manual-clock (fallback)
 

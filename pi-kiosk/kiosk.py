@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-FW Attendance — Pi Kiosk Face Scanner
+FW Gatekeeper - Pi Kiosk Face Scanner
 
 Runs locally on a Raspberry Pi 3B with camera.
 - Captures face from camera
 - Matches against locally cached worker encodings
-- Logs attendance (clock in/out) locally
-- Syncs with FW Attendance server when WiFi is available
+- Logs clock in/out locally
+- Syncs with FW Gatekeeper server when WiFi is available
 
 Usage:
     python3 kiosk.py [--server URL] [--kiosk-id ID] [--camera usb|pi] [--threshold 0.6]
@@ -34,7 +34,7 @@ ENCODINGS_FILE = DATA_DIR / "encodings.json"
 ATTENDANCE_LOG = DATA_DIR / "attendance_offline.json"
 CONFIG_FILE = DATA_DIR / "config.json"
 
-DEFAULT_SERVER = "https://fw-attendance.onrender.com"
+DEFAULT_SERVER = "https://fw-gatekeeper.onrender.com"
 MATCH_THRESHOLD = 0.6
 CAPTURE_WIDTH = 640
 CAPTURE_HEIGHT = 480
@@ -112,7 +112,7 @@ class Camera:
 # ─── Encoding Storage ──────────────────────────────────────────
 
 class EncodingStore:
-    """Manages worker face encodings — syncs from server, caches locally."""
+    """Manages worker face encodings - syncs from server, caches locally."""
 
     def __init__(self, server_url: str):
         self.server_url = server_url.rstrip("/")
@@ -161,7 +161,7 @@ class EncodingStore:
             return True
 
         except requests.ConnectionError:
-            log.warning("Server unreachable — using cached encodings")
+            log.warning("Server unreachable - using cached encodings")
             return False
         except Exception as e:
             log.warning(f"Sync error: {e}")
@@ -202,7 +202,7 @@ class EncodingStore:
 # ─── Attendance Logger ─────────────────────────────────────────
 
 class AttendanceLogger:
-    """Logs attendance locally and syncs to server when possible."""
+    """Logs events locally and syncs to server when possible."""
 
     def __init__(self, server_url: str, kiosk_id: str):
         self.server_url = server_url.rstrip("/")
@@ -216,7 +216,7 @@ class AttendanceLogger:
             try:
                 self.pending = json.loads(ATTENDANCE_LOG.read_text())
                 if self.pending:
-                    log.info(f"{len(self.pending)} pending attendance records to sync")
+                    log.info(f"{len(self.pending)} pending gatekeeper records to sync")
             except Exception:
                 self.pending = []
 
@@ -246,7 +246,7 @@ class AttendanceLogger:
         log.info(f"Logged: {worker_name} (confidence: {confidence})")
 
     def sync(self) -> int:
-        """Push pending attendance records to server. Returns count synced."""
+        """Push pending records to server. Returns count synced."""
         if not self.pending:
             return 0
 
@@ -276,7 +276,7 @@ class AttendanceLogger:
         self.pending = remaining
         self._save_pending()
         if synced:
-            log.info(f"Synced {synced} attendance records to server")
+            log.info(f"Synced {synced} gatekeeper records to server")
         return synced
 
 
@@ -299,7 +299,7 @@ def show_status(message: str, color: str = "white"):
     r = colors["reset"]
     clear_screen()
     print(f"\n{'=' * 50}")
-    print(f"  {colors['gold']}FW{r} Attendance Kiosk")
+    print(f"  {colors['gold']}FW{r} Gatekeeper Kiosk")
     print(f"{'=' * 50}")
     print(f"\n  {c}{message}{r}\n")
     print(f"{'=' * 50}")
@@ -336,7 +336,7 @@ def run_kiosk(args):
     last_sync = time.time()
     SYNC_INTERVAL = 300  # re-sync every 5 minutes
 
-    show_status("Ready — Look at the camera", "green")
+    show_status("Ready - Look at the camera", "green")
 
     try:
         while True:
@@ -358,7 +358,7 @@ def run_kiosk(args):
             face_locations = face_recognition.face_locations(frame, model="hog")
 
             if not face_locations:
-                show_status("Ready — Look at the camera", "green")
+                show_status("Ready - Look at the camera", "green")
                 time.sleep(0.5)
                 continue
 
@@ -376,7 +376,7 @@ def run_kiosk(args):
             if match:
                 if logger.is_cooldown(match["id"]):
                     show_status(
-                        f"✅ Welcome, {match['name']}!\n   Already scanned — please proceed.",
+                        f"✅ Welcome, {match['name']}!\n   Already scanned - please proceed.",
                         "green"
                     )
                 else:
@@ -392,7 +392,7 @@ def run_kiosk(args):
                 show_status("❌ Face not recognized\n   Please see a manager.", "red")
 
             time.sleep(3)  # Show result for 3 seconds
-            show_status("Ready — Look at the camera", "green")
+            show_status("Ready - Look at the camera", "green")
 
     except KeyboardInterrupt:
         log.info("Shutting down...")
@@ -403,8 +403,8 @@ def run_kiosk(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="FW Attendance Pi Kiosk")
-    parser.add_argument("--server", default=DEFAULT_SERVER, help="FW Attendance server URL")
+    parser = argparse.ArgumentParser(description="FW Gatekeeper Pi Kiosk")
+    parser.add_argument("--server", default=DEFAULT_SERVER, help="FW Gatekeeper server URL")
     parser.add_argument("--kiosk-id", default="kiosk-1", help="Unique kiosk identifier")
     parser.add_argument("--camera", choices=["auto", "pi", "usb"], default="auto", help="Camera type")
     parser.add_argument("--threshold", type=float, default=MATCH_THRESHOLD, help="Face match threshold (0-1, lower=stricter)")

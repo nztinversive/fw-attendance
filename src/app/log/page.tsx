@@ -24,7 +24,7 @@ export default function LogPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `attendance-${date}.csv`;
+    a.download = `gatekeeper-${date}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -33,7 +33,7 @@ export default function LogPage() {
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h1 className="text-2xl font-bold">
-          <span className="text-gold">Attendance</span> Log
+          <span className="text-gold">Gatekeeper</span> Log
         </h1>
         <div className="flex items-center gap-3">
           <input

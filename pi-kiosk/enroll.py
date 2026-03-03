@@ -1,4 +1,4 @@
-"""Enrollment CLI for FW Attendance kiosk.
+"""Enrollment CLI for FW Gatekeeper kiosk.
 
 Usage:
   py enroll.py add "Worker Name"
@@ -309,7 +309,7 @@ def remove_worker(name: str):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="FW Attendance enrollment tool")
+    parser = argparse.ArgumentParser(description="FW Gatekeeper enrollment tool")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_parser = subparsers.add_parser("add", help="Enroll a worker")

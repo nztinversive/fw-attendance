@@ -1,4 +1,4 @@
-"""End-to-end test for the FW Attendance system.
+"""End-to-end test for the FW Gatekeeper system.
 
 Tests the complete flow:
   1. Enroll a worker (simulate webcam → /api/enroll → /encode pipeline)

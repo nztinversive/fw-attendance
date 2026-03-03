@@ -133,7 +133,7 @@ def index():
     #status{margin-top:12px;font-size:1rem;color:#ddd;}
     </style></head>
     <body>
-      <h1>FW Attendance Quick Test</h1>
+      <h1>FW Gatekeeper Quick Test</h1>
       <img src="/feed" width="960" alt="camera feed">
       <div id="status">Loading...</div>
       <script>

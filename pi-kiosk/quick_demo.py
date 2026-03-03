@@ -1,5 +1,5 @@
 """
-FW Attendance — Quick Face Recognition Demo
+FW Gatekeeper — Quick Face Recognition Demo
 =============================================
 Press 'e' to enroll the current face (prompts for name in terminal).
 Press 'r' to reset all enrolled faces.
@@ -55,7 +55,7 @@ def enroll_face(frame: np.ndarray):
         return
 
     # Show the frame with a prompt overlay so user knows it captured
-    cv2.imshow("FW Attendance Demo", frame)
+    cv2.imshow("FW Gatekeeper Demo", frame)
     cv2.waitKey(1)
 
     name = input("\n  Enter name for enrollment: ").strip()
@@ -86,7 +86,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     print("\n" + "=" * 55)
-    print("  ⚡ FW Attendance — Face Recognition Demo")
+    print("  ⚡ FW Gatekeeper — Face Recognition Demo")
     print("=" * 55)
     print("  [e] Enroll face    [r] Reset all    [q] Quit")
     print("=" * 55 + "\n")
@@ -169,7 +169,7 @@ def main():
         # ─── HUD ─────────────────────────────────────────────
         # Top bar
         cv2.rectangle(frame, (0, 0), (w, 40), DARK, -1)
-        cv2.putText(frame, "FW Attendance", (10, 28), FONT, 0.7, GOLD, 2)
+        cv2.putText(frame, "FW Gatekeeper", (10, 28), FONT, 0.7, GOLD, 2)
         time_str = datetime.now().strftime("%I:%M:%S %p")
         cv2.putText(frame, time_str, (w - 180, 28), FONT, 0.6, WHITE, 1)
 
@@ -185,7 +185,7 @@ def main():
             hint = "[e] Enroll  [r] Reset  [q] Quit"
             cv2.putText(frame, hint, (10, h - 14), FONT, 0.5, GOLD, 1)
 
-        cv2.imshow("FW Attendance Demo", frame)
+        cv2.imshow("FW Gatekeeper Demo", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
