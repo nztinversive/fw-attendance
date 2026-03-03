@@ -5,3 +5,5 @@ data/
 next-env.d.ts
 __pycache__/
 *.pyc
+
+.env.local

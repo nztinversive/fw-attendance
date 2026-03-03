@@ -1,0 +1,75 @@
+import { query, mutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const list = query({
+  args: {},
+  handler: async (ctx) => {
+    const schedules = await ctx.db
+      .query("schedules")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .collect();
+    schedules.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return schedules.map((s) => ({
+      id: s._id,
+      name: s.name,
+      days: s.days,
+      start_time: s.startTime,
+      end_time: s.endTime,
+      department: s.department || null,
+      active: 1,
+      created_at: s.createdAt,
+    }));
+  },
+});
+
+export const create = mutation({
+  args: {
+    name: v.string(),
+    days: v.string(),
+    startTime: v.string(),
+    endTime: v.string(),
+    department: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const id = await ctx.db.insert("schedules", {
+      name: args.name,
+      days: args.days,
+      startTime: args.startTime,
+      endTime: args.endTime,
+      department: args.department,
+      active: true,
+      createdAt: new Date().toISOString(),
+    });
+    return { id };
+  },
+});
+
+export const update = mutation({
+  args: {
+    id: v.id("schedules"),
+    name: v.optional(v.string()),
+    days: v.optional(v.string()),
+    startTime: v.optional(v.string()),
+    endTime: v.optional(v.string()),
+    department: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { id, ...fields } = args;
+    const updates: Record<string, unknown> = {};
+    if (fields.name !== undefined) updates.name = fields.name;
+    if (fields.days !== undefined) updates.days = fields.days;
+    if (fields.startTime !== undefined) updates.startTime = fields.startTime;
+    if (fields.endTime !== undefined) updates.endTime = fields.endTime;
+    if (fields.department !== undefined) updates.department = fields.department || undefined;
+    await ctx.db.patch(id, updates);
+    return { ok: true };
+  },
+});
+
+export const remove = mutation({
+  args: { id: v.id("schedules") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { active: false });
+    return { ok: true };
+  },
+});

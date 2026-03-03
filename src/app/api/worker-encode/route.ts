@@ -1,16 +1,10 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import convex from '@/lib/convex';
+import { api } from '../../../../convex/_generated/api';
 
-/**
- * POST /api/workers/encode
- * Accepts: { worker_id, encoding: number[] }
- * Stores a pre-computed face encoding for a worker.
- * Used by the Pi kiosk or local face-service to push encodings back to server.
- */
 export async function POST(req: NextRequest) {
   try {
-    const db = getDb();
     const body = await req.json().catch(() => ({}));
     const { worker_id, encoding } = body;
 
@@ -18,12 +12,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'worker_id and encoding (array) required' }, { status: 400 });
     }
 
-    const worker = db.prepare('SELECT id, name FROM workers WHERE id = ? AND active = 1').get(worker_id) as { id: string; name: string } | undefined;
+    const worker = await convex.query(api.workers.get, { id: worker_id as any });
     if (!worker) {
       return NextResponse.json({ error: 'Worker not found' }, { status: 404 });
     }
 
-    db.prepare('UPDATE workers SET face_encoding = ? WHERE id = ?').run(JSON.stringify(encoding), worker_id);
+    await convex.mutation(api.workers.update, {
+      id: worker_id as any,
+      faceEncoding: encoding,
+    });
 
     return NextResponse.json({
       ok: true,

@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import crypto from 'crypto';
+import convex from '@/lib/convex';
+import { api } from '../../../../../convex/_generated/api';
 
 export async function POST(req: NextRequest) {
-  const db = getDb();
   const body = await req.json();
-  // Accept both { events: [...] } and { kiosk_id, logs: [...] } formats
   const events = body.events || body.logs;
   const bulkKioskId = body.kiosk_id;
 
@@ -13,28 +11,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'events (or logs) array required' }, { status: 400 });
   }
 
-  const insert = db.prepare(
-    'INSERT OR IGNORE INTO attendance (id, worker_id, event_type, kiosk_id, timestamp, synced, worker_name, confidence, liveness_confirmed) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)'
-  );
+  const mapped = events.map((e: any) => ({
+    workerId: e.worker_id,
+    eventType: e.event_type || e.action,
+    kioskId: e.kiosk_id || bulkKioskId || undefined,
+    timestamp: e.timestamp,
+    workerName: e.worker_name || undefined,
+    confidence: e.confidence || undefined,
+    livenessConfirmed: e.liveness_confirmed ? true : undefined,
+  }));
 
-  const tx = db.transaction(() => {
-    let count = 0;
-    for (const e of events) {
-      insert.run(
-        e.id || crypto.randomUUID(),
-        e.worker_id,
-        e.event_type || e.action,
-        e.kiosk_id || bulkKioskId || null,
-        e.timestamp,
-        e.worker_name || '',
-        e.confidence || 0.0,
-        e.liveness_confirmed ? 1 : 0
-      );
-      count++;
-    }
-    return count;
-  });
-
-  const count = tx();
-  return NextResponse.json({ synced: count });
+  const result = await convex.mutation(api.attendance.bulkCreate, { events: mapped });
+  return NextResponse.json(result);
 }

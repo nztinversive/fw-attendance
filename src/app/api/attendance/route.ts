@@ -1,31 +1,16 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import crypto from 'crypto';
+import convex from '@/lib/convex';
+import { api } from '../../../../convex/_generated/api';
 
 export async function GET(req: NextRequest) {
   try {
-    const db = getDb();
     const date = req.nextUrl.searchParams.get('date') || new Date().toISOString().split('T')[0];
     const workerId = req.nextUrl.searchParams.get('worker_id');
-
-    let sql = `
-      SELECT a.*, COALESCE(w.name, a.worker_name) as worker_name, w.department as worker_department, k.name as kiosk_name
-      FROM attendance a
-      LEFT JOIN workers w ON a.worker_id = w.id
-      LEFT JOIN kiosks k ON a.kiosk_id = k.id
-      WHERE a.timestamp LIKE ?
-    `;
-    const params: unknown[] = [`${date}%`];
-
-    if (workerId) {
-      sql += ' AND a.worker_id = ?';
-      params.push(workerId);
-    }
-
-    sql += ' ORDER BY a.timestamp DESC';
-
-    const rows = db.prepare(sql).all(...params);
+    const rows = await convex.query(api.attendance.list, {
+      date,
+      workerId: workerId || undefined,
+    });
     return NextResponse.json(rows);
   } catch (error) {
     console.error('Attendance GET error:', error);
@@ -35,7 +20,6 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const db = getDb();
     const body = await req.json().catch(() => ({}));
     const { worker_id, event_type, type, kiosk_id, timestamp } = body;
     const resolvedType = event_type || type;
@@ -44,12 +28,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'worker_id and event_type (or type) required' }, { status: 400 });
     }
 
-    const id = crypto.randomUUID();
-    db.prepare(
-      'INSERT INTO attendance (id, worker_id, event_type, kiosk_id, timestamp, synced) VALUES (?, ?, ?, ?, ?, 0)'
-    ).run(id, worker_id, resolvedType, kiosk_id || null, timestamp || new Date().toISOString());
+    const result = await convex.mutation(api.attendance.create, {
+      workerId: worker_id,
+      eventType: resolvedType,
+      kioskId: kiosk_id || undefined,
+      timestamp: timestamp || undefined,
+    });
 
-    return NextResponse.json({ id }, { status: 201 });
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
     console.error('Attendance POST error:', error);
     return NextResponse.json({ error: 'Failed to record attendance' }, { status: 500 });

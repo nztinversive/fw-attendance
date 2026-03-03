@@ -1,0 +1,43 @@
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export default defineSchema({
+  workers: defineTable({
+    name: v.string(),
+    department: v.string(),
+    photoStorageIds: v.optional(v.array(v.id("_storage"))),
+    faceEncoding: v.optional(v.array(v.float64())),
+    enrolledAt: v.string(),
+    active: v.boolean(),
+  }).index("by_active", ["active"]),
+
+  attendance: defineTable({
+    workerId: v.string(),
+    eventType: v.string(),
+    kioskId: v.optional(v.string()),
+    timestamp: v.string(),
+    synced: v.boolean(),
+    workerName: v.optional(v.string()),
+    confidence: v.optional(v.float64()),
+    livenessConfirmed: v.optional(v.boolean()),
+  }).index("by_timestamp", ["timestamp"])
+    .index("by_worker", ["workerId"]),
+
+  kiosks: defineTable({
+    name: v.string(),
+    type: v.string(),
+    location: v.string(),
+    lastSync: v.optional(v.string()),
+    active: v.boolean(),
+  }).index("by_active", ["active"]),
+
+  schedules: defineTable({
+    name: v.string(),
+    days: v.string(),
+    startTime: v.string(),
+    endTime: v.string(),
+    department: v.optional(v.string()),
+    active: v.boolean(),
+    createdAt: v.string(),
+  }).index("by_active", ["active"]),
+});

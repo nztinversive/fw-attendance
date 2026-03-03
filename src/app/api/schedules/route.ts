@@ -1,12 +1,11 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import crypto from 'crypto';
+import convex from '@/lib/convex';
+import { api } from '../../../../convex/_generated/api';
 
 export async function GET() {
   try {
-    const db = getDb();
-    const schedules = db.prepare('SELECT * FROM schedules WHERE active = 1 ORDER BY created_at DESC').all();
+    const schedules = await convex.query(api.schedules.list, {});
     return NextResponse.json(schedules);
   } catch (error) {
     console.error('Schedules GET error:', error);
@@ -16,19 +15,18 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-  const db = getDb();
-  const { name, days, start_time, end_time, department } = await req.json().catch(() => ({}));
-
-  if (!name || !days || !start_time || !end_time) {
-    return NextResponse.json({ error: 'name, days, start_time, and end_time required' }, { status: 400 });
-  }
-
-  const id = crypto.randomUUID();
-  db.prepare(
-    'INSERT INTO schedules (id, name, days, start_time, end_time, department, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
-  ).run(id, name, JSON.stringify(days), start_time, end_time, department || null, new Date().toISOString());
-
-  return NextResponse.json({ id }, { status: 201 });
+    const { name, days, start_time, end_time, department } = await req.json().catch(() => ({}));
+    if (!name || !days || !start_time || !end_time) {
+      return NextResponse.json({ error: 'name, days, start_time, and end_time required' }, { status: 400 });
+    }
+    const result = await convex.mutation(api.schedules.create, {
+      name,
+      days: typeof days === 'string' ? days : JSON.stringify(days),
+      startTime: start_time,
+      endTime: end_time,
+      department: department || undefined,
+    });
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
     console.error('Schedules POST error:', error);
     return NextResponse.json({ error: 'Failed to create schedule' }, { status: 500 });
@@ -37,26 +35,18 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-  const db = getDb();
-  const { id, name, days, start_time, end_time, department } = await req.json();
+    const { id, name, days, start_time, end_time, department } = await req.json();
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
-  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+    const updates: Record<string, unknown> = { id };
+    if (name !== undefined) updates.name = name;
+    if (days !== undefined) updates.days = typeof days === 'string' ? days : JSON.stringify(days);
+    if (start_time !== undefined) updates.startTime = start_time;
+    if (end_time !== undefined) updates.endTime = end_time;
+    if (department !== undefined) updates.department = department || undefined;
 
-  const fields: string[] = [];
-  const values: unknown[] = [];
-
-  if (name !== undefined) { fields.push('name = ?'); values.push(name); }
-  if (days !== undefined) { fields.push('days = ?'); values.push(JSON.stringify(days)); }
-  if (start_time !== undefined) { fields.push('start_time = ?'); values.push(start_time); }
-  if (end_time !== undefined) { fields.push('end_time = ?'); values.push(end_time); }
-  if (department !== undefined) { fields.push('department = ?'); values.push(department || null); }
-
-  if (fields.length === 0) return NextResponse.json({ error: 'nothing to update' }, { status: 400 });
-
-  values.push(id);
-  db.prepare(`UPDATE schedules SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-
-  return NextResponse.json({ ok: true });
+    await convex.mutation(api.schedules.update, updates as any);
+    return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Schedules PATCH error:', error);
     return NextResponse.json({ error: 'Failed to update schedule' }, { status: 500 });
@@ -65,12 +55,9 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const db = getDb();
     const id = req.nextUrl.searchParams.get('id');
-
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
-
-    db.prepare('UPDATE schedules SET active = 0 WHERE id = ?').run(id);
+    await convex.mutation(api.schedules.remove, { id: id as any });
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Schedules DELETE error:', error);
