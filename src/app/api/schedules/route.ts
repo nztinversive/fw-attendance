@@ -4,14 +4,20 @@ import { getDb } from '@/lib/db';
 import crypto from 'crypto';
 
 export async function GET() {
-  const db = getDb();
-  const schedules = db.prepare('SELECT * FROM schedules WHERE active = 1 ORDER BY created_at DESC').all();
-  return NextResponse.json(schedules);
+  try {
+    const db = getDb();
+    const schedules = db.prepare('SELECT * FROM schedules WHERE active = 1 ORDER BY created_at DESC').all();
+    return NextResponse.json(schedules);
+  } catch (error) {
+    console.error('Schedules GET error:', error);
+    return NextResponse.json({ error: 'Failed to fetch schedules' }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
+  try {
   const db = getDb();
-  const { name, days, start_time, end_time, department } = await req.json();
+  const { name, days, start_time, end_time, department } = await req.json().catch(() => ({}));
 
   if (!name || !days || !start_time || !end_time) {
     return NextResponse.json({ error: 'name, days, start_time, and end_time required' }, { status: 400 });
@@ -23,9 +29,14 @@ export async function POST(req: NextRequest) {
   ).run(id, name, JSON.stringify(days), start_time, end_time, department || null, new Date().toISOString());
 
   return NextResponse.json({ id }, { status: 201 });
+  } catch (error) {
+    console.error('Schedules POST error:', error);
+    return NextResponse.json({ error: 'Failed to create schedule' }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: NextRequest) {
+  try {
   const db = getDb();
   const { id, name, days, start_time, end_time, department } = await req.json();
 
@@ -46,14 +57,23 @@ export async function PATCH(req: NextRequest) {
   db.prepare(`UPDATE schedules SET ${fields.join(', ')} WHERE id = ?`).run(...values);
 
   return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('Schedules PATCH error:', error);
+    return NextResponse.json({ error: 'Failed to update schedule' }, { status: 500 });
+  }
 }
 
 export async function DELETE(req: NextRequest) {
-  const db = getDb();
-  const id = req.nextUrl.searchParams.get('id');
+  try {
+    const db = getDb();
+    const id = req.nextUrl.searchParams.get('id');
 
-  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
-  db.prepare('UPDATE schedules SET active = 0 WHERE id = ?').run(id);
-  return NextResponse.json({ ok: true });
+    db.prepare('UPDATE schedules SET active = 0 WHERE id = ?').run(id);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('Schedules DELETE error:', error);
+    return NextResponse.json({ error: 'Failed to delete schedule' }, { status: 500 });
+  }
 }

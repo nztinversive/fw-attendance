@@ -74,6 +74,9 @@ export default function EnrollPage() {
     return canvas.toDataURL('image/jpeg', 0.85);
   }, []);
 
+  const submitEnrollmentRef = useRef(submitEnrollment);
+  submitEnrollmentRef.current = submitEnrollment;
+
   const startCapturing = useCallback(() => {
     setStep('capturing');
     setCaptureCount(0);
@@ -93,7 +96,7 @@ export default function EnrollPage() {
 
       if (count >= CAPTURES_REQUIRED) {
         setStep('processing');
-        submitEnrollment(captured);
+        submitEnrollmentRef.current(captured);
         return;
       }
 

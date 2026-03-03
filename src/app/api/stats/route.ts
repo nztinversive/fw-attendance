@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 
 export async function GET() {
+  try {
   const db = getDb();
   const today = new Date().toISOString().split('T')[0];
 
@@ -65,4 +66,8 @@ export async function GET() {
     avgArrival,
     ...(hasScheduleToday ? {} : { scheduleWarning: 'No schedule found for today' }),
   });
+  } catch (error) {
+    console.error('Stats error:', error);
+    return NextResponse.json({ error: 'Failed to fetch stats' }, { status: 500 });
+  }
 }

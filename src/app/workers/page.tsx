@@ -13,8 +13,13 @@ export default function WorkersPage() {
   const [photo, setPhoto] = useState('');
 
   const fetchWorkers = useCallback(async () => {
-    const res = await fetch('/api/workers');
-    setWorkers(await res.json());
+    try {
+      const res = await fetch('/api/workers');
+      if (!res.ok) throw new Error('Failed to fetch workers');
+      setWorkers(await res.json());
+    } catch (err) {
+      console.error('Failed to fetch workers', err);
+    }
   }, []);
 
   useEffect(() => { fetchWorkers(); }, [fetchWorkers]);

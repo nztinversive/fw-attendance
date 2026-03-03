@@ -11,8 +11,13 @@ export default function KiosksPage() {
   const [location, setLocation] = useState('');
 
   const fetchKiosks = useCallback(async () => {
-    const res = await fetch('/api/kiosks');
-    setKiosks(await res.json());
+    try {
+      const res = await fetch('/api/kiosks');
+      if (!res.ok) throw new Error('Failed to fetch kiosks');
+      setKiosks(await res.json());
+    } catch (err) {
+      console.error('Failed to fetch kiosks', err);
+    }
   }, []);
 
   useEffect(() => { fetchKiosks(); }, [fetchKiosks]);

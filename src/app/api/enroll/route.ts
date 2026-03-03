@@ -16,8 +16,9 @@ import path from 'path';
  * For now: stores photos + creates worker record. The Pi kiosk syncs encodings.
  */
 export async function POST(req: NextRequest) {
+  try {
   const db = getDb();
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
   const { name, department, photos } = body as {
     name?: string;
     department?: string;
@@ -37,16 +38,26 @@ export async function POST(req: NextRequest) {
 
   const id = crypto.randomUUID();
   const photosDir = path.join(process.cwd(), 'data', 'photos', id);
-  if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
+  try {
+    if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
+  } catch (dirErr) {
+    console.error('Failed to create photos directory:', dirErr);
+    // Continue anyway — photos won't be saved to disk but enrollment can still work
+  }
 
   const savedPaths: string[] = [];
   for (let i = 0; i < photos.length; i++) {
-    const base64Data = photos[i].replace(/^data:image\/\w+;base64,/, '');
-    const buffer = Buffer.from(base64Data, 'base64');
-    const filename = `capture_${i + 1}.jpg`;
-    const filepath = path.join(photosDir, filename);
-    fs.writeFileSync(filepath, buffer);
-    savedPaths.push(filepath);
+    try {
+      const base64Data = photos[i].replace(/^data:image\/\w+;base64,/, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+      const filename = `capture_${i + 1}.jpg`;
+      const filepath = path.join(photosDir, filename);
+      fs.writeFileSync(filepath, buffer);
+      savedPaths.push(filepath);
+    } catch (writeErr) {
+      console.error(`Failed to save photo ${i + 1}:`, writeErr);
+      // Continue — photo save failure shouldn't block enrollment
+    }
   }
 
   // Try to generate face encoding via the Python encode service
@@ -87,4 +98,9 @@ export async function POST(req: NextRequest) {
     },
     { status: 201 }
   );
+  } catch (error) {
+    console.error('Enrollment error:', error);
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
