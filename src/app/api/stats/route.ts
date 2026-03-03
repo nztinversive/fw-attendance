@@ -50,11 +50,19 @@ export async function GET() {
     avgArrival = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
   }
 
+  // Check if any schedule covers today
+  const dayOfWeek = new Date().getDay(); // 0=Sun..6=Sat
+  const schedules = db.prepare('SELECT days FROM schedules WHERE active = 1').all() as { days: string }[];
+  const hasScheduleToday = schedules.some((s) => {
+    try { return (JSON.parse(s.days) as number[]).includes(dayOfWeek); } catch { return false; }
+  });
+
   return NextResponse.json({
     totalWorkers,
     clockedIn,
     clockedOut,
     notArrived,
     avgArrival,
+    ...(hasScheduleToday ? {} : { scheduleWarning: 'No schedule found for today' }),
   });
 }

@@ -9,6 +9,7 @@ const links = [
   { href: '/workers', label: 'Workers', icon: '👷' },
   { href: '/enroll', label: 'Enroll Face', icon: '🧑‍💻' },
   { href: '/kiosks', label: 'Kiosks', icon: '🖥️' },
+  { href: '/schedules', label: 'Schedules', icon: '📅' },
   { href: '/reports', label: 'Reports', icon: '📈' },
 ];
 

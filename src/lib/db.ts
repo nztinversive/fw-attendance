@@ -47,6 +47,16 @@ export function getDb(): Database.Database {
       last_sync TEXT,
       active INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS schedules (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      days TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL,
+      department TEXT,
+      active INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_attendance_worker ON attendance(worker_id);
     CREATE INDEX IF NOT EXISTS idx_attendance_timestamp ON attendance(timestamp);
   `);

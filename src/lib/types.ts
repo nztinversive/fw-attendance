@@ -37,4 +37,16 @@ export interface DashboardStats {
   clockedIn: number;
   clockedOut: number;
   notArrived: number;
+  scheduleWarning?: string;
+}
+
+export interface Schedule {
+  id: string;
+  name: string;
+  days: string; // JSON array e.g. '[1,2,3,4,5]'
+  start_time: string;
+  end_time: string;
+  department: string | null;
+  active: number;
+  created_at: string;
 }

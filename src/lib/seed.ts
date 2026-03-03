@@ -28,10 +28,25 @@ export function seedDatabase(db: Database.Database) {
     'INSERT INTO attendance (id, worker_id, event_type, kiosk_id, timestamp, synced) VALUES (?, ?, ?, ?, ?, 1)'
   );
 
+  const insertSchedule = db.prepare(
+    'INSERT INTO schedules (id, name, days, start_time, end_time, department, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
+  );
+
   const tx = db.transaction(() => {
     for (const w of workers) {
       insertWorker.run(w.id, w.name, w.department, now.toISOString());
     }
+
+    // Default Mon-Fri schedule
+    insertSchedule.run(
+      crypto.randomUUID(),
+      'Default Mon-Fri',
+      '[1,2,3,4,5]',
+      '06:00',
+      '14:30',
+      null,
+      now.toISOString()
+    );
     for (const k of kiosks) {
       insertKiosk.run(k.id, k.name, k.type, k.location);
     }
