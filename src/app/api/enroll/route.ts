@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ photos: photos }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(3000),
     });
     if (encodeRes.ok) {
       const encodeData = await encodeRes.json();

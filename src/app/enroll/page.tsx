@@ -79,12 +79,6 @@ export default function EnrollPage() {
     let count = 0;
 
     const doCapture = () => {
-      if (count >= CAPTURES_REQUIRED) {
-        setStep('processing');
-        submitEnrollment(captured);
-        return;
-      }
-
       const frame = captureFrame();
       if (frame) {
         captured.push(frame);
@@ -93,9 +87,13 @@ export default function EnrollPage() {
         setPhotos([...captured]);
       }
 
-      if (count < CAPTURES_REQUIRED) {
-        captureTimerRef.current = setTimeout(doCapture, CAPTURE_INTERVAL_MS);
+      if (count >= CAPTURES_REQUIRED) {
+        setStep('processing');
+        submitEnrollment(captured);
+        return;
       }
+
+      captureTimerRef.current = setTimeout(doCapture, CAPTURE_INTERVAL_MS);
     };
 
     // First capture after a brief delay
