@@ -74,38 +74,7 @@ export default function EnrollPage() {
     return canvas.toDataURL('image/jpeg', 0.85);
   }, []);
 
-  const submitEnrollmentRef = useRef(submitEnrollment);
-  submitEnrollmentRef.current = submitEnrollment;
-
-  const startCapturing = useCallback(() => {
-    setStep('capturing');
-    setCaptureCount(0);
-    setPhotos([]);
-
-    const captured: string[] = [];
-    let count = 0;
-
-    const doCapture = () => {
-      const frame = captureFrame();
-      if (frame) {
-        captured.push(frame);
-        count++;
-        setCaptureCount(count);
-        setPhotos([...captured]);
-      }
-
-      if (count >= CAPTURES_REQUIRED) {
-        setStep('processing');
-        submitEnrollmentRef.current(captured);
-        return;
-      }
-
-      captureTimerRef.current = setTimeout(doCapture, CAPTURE_INTERVAL_MS);
-    };
-
-    // First capture after a brief delay
-    captureTimerRef.current = setTimeout(doCapture, 500);
-  }, [captureFrame]);
+  const submitEnrollmentRef = useRef<(photos: string[]) => Promise<void>>(null!);
 
   const submitEnrollment = async (capturedPhotos: string[]) => {
     try {
@@ -138,6 +107,37 @@ export default function EnrollPage() {
       setStep('error');
     }
   };
+
+  submitEnrollmentRef.current = submitEnrollment;
+
+  const startCapturing = useCallback(() => {
+    setStep('capturing');
+    setCaptureCount(0);
+    setPhotos([]);
+
+    const captured: string[] = [];
+    let count = 0;
+
+    const doCapture = () => {
+      const frame = captureFrame();
+      if (frame) {
+        captured.push(frame);
+        count++;
+        setCaptureCount(count);
+        setPhotos([...captured]);
+      }
+
+      if (count >= CAPTURES_REQUIRED) {
+        setStep('processing');
+        submitEnrollmentRef.current(captured);
+        return;
+      }
+
+      captureTimerRef.current = setTimeout(doCapture, CAPTURE_INTERVAL_MS);
+    };
+
+    captureTimerRef.current = setTimeout(doCapture, 500);
+  }, [captureFrame]);
 
   // Step: Enter Name
   if (step === 'name') {
