@@ -10,3 +10,15 @@ services:
         value: production
       - key: NEXT_PUBLIC_CONVEX_URL
         value: https://modest-bat-146.convex.cloud
+      - key: FACE_ENCODE_URL
+        value: https://fw-face-service.onrender.com/encode
+
+  - type: web
+    name: fw-face-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./face-service/Dockerfile
+    dockerContext: ./face-service
+    envVars:
+      - key: PORT
+        value: "5557"
