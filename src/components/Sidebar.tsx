@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 const links = [
   { href: '/', label: 'Dashboard', icon: '📊' },
@@ -15,6 +15,13 @@ const links = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
+  }
 
   return (
     <>
@@ -41,6 +48,15 @@ export default function Sidebar() {
             </Link>
           ))}
         </nav>
+        <div className="p-2 border-t border-gray-800">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors w-full"
+          >
+            <span>🚪</span>
+            Logout
+          </button>
+        </div>
       </aside>
 
       {/* Mobile bottom tabs */}
