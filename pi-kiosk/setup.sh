@@ -43,7 +43,7 @@ apt-get update -qq
 apt-get upgrade -y -qq
 
 # ─── 2. Install Dependencies ───────────────────────────────────
-echo "[2/7] Installing dependencies..."
+echo "[2/8] Installing dependencies..."
 apt-get install -y -qq \
   python3 python3-pip python3-venv python3-dev \
   cmake build-essential \
@@ -53,10 +53,13 @@ apt-get install -y -qq \
   libcamera-dev libcamera-apps \
   python3-picamera2 \
   sqlite3 \
-  curl wget git
+  curl wget git \
+  xserver-xorg x11-xserver-utils xinit \
+  chromium-browser \
+  unclutter
 
 # ─── 3. Install Kiosk Application ──────────────────────────────
-echo "[3/7] Installing FW Gatekeeper kiosk..."
+echo "[3/8] Installing FW Gatekeeper kiosk..."
 mkdir -p "$INSTALL_DIR"
 
 # Clone or update repo
@@ -74,7 +77,7 @@ python3 -m venv venv --system-site-packages
 ./venv/bin/pip install -r requirements.txt
 
 # ─── 4. Download Face Models ───────────────────────────────────
-echo "[4/7] Downloading face models..."
+echo "[4/8] Downloading face models..."
 mkdir -p data/models
 
 # dlib shape predictor (for liveness blink detection)
@@ -90,7 +93,7 @@ fi
 mkdir -p data/faces
 
 # ─── 5. Write Kiosk Config ─────────────────────────────────────
-echo "[5/7] Writing kiosk configuration..."
+echo "[5/8] Writing kiosk configuration..."
 cat > config_local.py << CONFEOF
 """Local kiosk configuration — overrides config.py defaults."""
 SERVER_URL = "$SERVER_URL"
@@ -111,8 +114,10 @@ except ImportError:
 PATCHEOF
 fi
 
-# ─── 6. Systemd Service ────────────────────────────────────────
-echo "[6/7] Installing systemd service..."
+# ─── 6. Systemd Services ───────────────────────────────────────
+echo "[6/8] Installing systemd services..."
+
+# Main kiosk service (face scanner + Flask web UI)
 cat > /etc/systemd/system/fw-gatekeeper-kiosk.service << EOF
 [Unit]
 Description=FW Gatekeeper Kiosk ($KIOSK_NAME)
@@ -123,15 +128,56 @@ Wants=network-online.target
 Type=simple
 User=$KIOSK_USER
 WorkingDirectory=$INSTALL_DIR/pi-kiosk
-ExecStart=$INSTALL_DIR/pi-kiosk/venv/bin/python kiosk.py \\
+ExecStart=$INSTALL_DIR/pi-kiosk/venv/bin/python main.py \\
   --server $SERVER_URL \\
   --kiosk-id $KIOSK_ID \\
-  --camera auto \\
-  --threshold 0.5
+  --camera auto
 Restart=always
 RestartSec=5
 StartLimitBurst=0
 Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Chromium kiosk display (fullscreen browser on HDMI monitor)
+cat > /etc/systemd/system/fw-gatekeeper-display.service << EOF
+[Unit]
+Description=FW Gatekeeper Display ($KIOSK_NAME)
+After=fw-gatekeeper-kiosk.service
+Requires=fw-gatekeeper-kiosk.service
+
+[Service]
+Type=simple
+User=$KIOSK_USER
+Environment=DISPLAY=:0
+ExecStartPre=/bin/bash -c 'for i in \$(seq 1 30); do curl -sf http://localhost:5555/health >/dev/null 2>&1 && exit 0; sleep 2; done; exit 1'
+ExecStart=/bin/bash -c '\\
+  xinit /bin/bash -c "\\
+    xset s off; \\
+    xset -dpms; \\
+    xset s noblank; \\
+    unclutter -idle 0.5 -root & \\
+    chromium-browser \\
+      --noerrdialogs \\
+      --disable-infobars \\
+      --kiosk \\
+      --incognito \\
+      --disable-translate \\
+      --disable-features=TranslateUI \\
+      --disable-session-crashed-bubble \\
+      --disable-component-update \\
+      --check-for-update-interval=31536000 \\
+      --autoplay-policy=no-user-gesture-required \\
+      --no-first-run \\
+      --start-fullscreen \\
+      http://localhost:5555 \\
+  " -- :0'
+Restart=always
+RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
@@ -163,10 +209,26 @@ EOF
 
 systemctl daemon-reload
 systemctl enable fw-gatekeeper-kiosk.service
+systemctl enable fw-gatekeeper-display.service
 systemctl enable fw-gatekeeper-watchdog.timer
 
-# ─── 7. Permissions & Cleanup ──────────────────────────────────
-echo "[7/7] Setting permissions..."
+# ─── 7. Auto-login ─────────────────────────────────────────────
+echo "[7/8] Configuring auto-login..."
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $KIOSK_USER --noclear %I \$TERM
+EOF
+
+# GPU memory split — give enough for Chromium rendering
+CONFIG="/boot/config.txt"
+if [ -f "$CONFIG" ] && ! grep -q "gpu_mem=" "$CONFIG"; then
+  echo "gpu_mem=128" >> "$CONFIG"
+fi
+
+# ─── 8. Permissions & Cleanup ──────────────────────────────────
+echo "[8/8] Setting permissions..."
 chown -R "$KIOSK_USER:$KIOSK_USER" "$INSTALL_DIR"
 
 # Disable screen blanking

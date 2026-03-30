@@ -8,21 +8,21 @@ Factory access control system for Fading West. Face recognition at entry/exit po
 ## Architecture
 
 ```
-┌─────────────────────┐         ┌──────────────────────────┐
-│  Pi Kiosk (x4)      │         │  Render (Cloud)          │
-│                     │         │                          │
-│  Camera → Face Det. │◄──WiFi──┤  FW Gatekeeper (Next.js) │
-│  → Local Match      │  sync   │  ├── Dashboard           │
-│  → Terminal Display  │  5min   │  ├── Enrollment          │
-│  → Offline Log      │────────►│  ├── Reports             │
-│                     │         │  └── API                 │
-│  SQLite (local)     │         │                          │
-└─────────────────────┘         │  Face Service (FastAPI)  │
-                                │  └── ArcFace ONNX encode │
-                                │                          │
-                                │  Convex (Database)       │
-                                │  └── Workers, Attendance │
-                                └──────────────────────────┘
+┌─────────────────────────┐         ┌──────────────────────────┐
+│  Pi Kiosk (x4)          │         │  Render (Cloud)          │
+│                         │         │                          │
+│  Camera → Face Detect   │◄──WiFi──┤  FW Gatekeeper (Next.js) │
+│  → Liveness (blink)     │  sync   │  ├── Dashboard           │
+│  → Local Match          │  5min   │  ├── Enrollment          │
+│  → HDMI Display         │────────►│  ├── Reports             │
+│    (Chromium fullscreen) │         │  └── API                 │
+│                         │         │                          │
+│  Flask Web UI (:5555)   │         │  Face Service (FastAPI)  │
+│  SQLite (offline log)   │         │  └── ArcFace ONNX encode │
+│                         │         │                          │
+└─────────────────────────┘         │  Convex (Database)       │
+                                    │  └── Workers, Attendance │
+                                    └──────────────────────────┘
 ```
 
 ## Stack
@@ -43,15 +43,56 @@ Factory access control system for Fading West. Face recognition at entry/exit po
 
 ## What You Need (Per Kiosk)
 
+### Required
+
+| Item | Recommended Model | Notes |
+|------|-------------------|-------|
+| Raspberry Pi | **Pi 4 Model B (2GB+)** | Pi 3B+ works but slower. Pi 5 also supported. |
+| microSD card | **32GB Class 10 / A2** | Samsung EVO Select or SanDisk Extreme recommended |
+| USB webcam | **Logitech C270 or C920** | C270 is $20 and works great. C920 for better quality. Pi Camera Module v2 also works. |
+| HDMI monitor | **7" to 10" HDMI display** | Mounted at face height next to the door. Any HDMI monitor works. |
+| Power supply | **Official Pi 4 USB-C 5V/3A** | Use the official one — cheap chargers cause instability |
+| HDMI cable | **Micro-HDMI to HDMI** (Pi 4) | Pi 3B uses full-size HDMI |
+| Ethernet or WiFi | WiFi for sync | Works fully offline after initial setup |
+
+### Recommended Accessories
+
 | Item | Notes |
 |------|-------|
-| Raspberry Pi 3B+ or newer | Pi 4 recommended for speed |
-| microSD card (16GB+) | Class 10 or better |
-| Pi Camera Module v2 or USB webcam | USB webcam is easier to set up |
-| Display | HDMI monitor or 7" touchscreen (optional — terminal UI works headless) |
-| Power supply | 5V 3A (Pi 4) or 5V 2.5A (Pi 3B) |
-| Ethernet or WiFi | WiFi for sync, works offline after initial setup |
-| Case + mount | Position camera at face height (~5 ft) |
+| Pi case with VESA mount | Mount Pi behind the monitor. Flirc or Argon cases work well. |
+| Camera mount / clip | Position camera at face height (~5 ft / 150cm). USB webcam clip mount works. |
+| USB extension cable (3ft) | If camera needs to be separate from the Pi |
+| Power strip with surge protector | One per kiosk location |
+| Cable management clips | Keep it clean on the wall |
+
+### Physical Setup Diagram
+
+```
+         ┌─────────────────┐
+         │                 │
+         │   HDMI Monitor  │  ← Mounted on wall at face height
+         │   (7-10 inch)   │
+         │                 │
+         │  ┌───────────┐  │
+         │  │  Welcome!  │  │  ← Shows camera feed + status
+         │  │  Marcus J. │  │
+         │  └───────────┘  │
+         └────────┬────────┘
+                  │ HDMI
+         ┌────────┴────────┐
+         │  Raspberry Pi   │  ← Mounted behind monitor (VESA) or below
+         │  (in case)      │
+         └───┬─────────┬───┘
+             │         │
+          USB │      ⚡ Power
+             │
+         ┌───┴───┐
+         │ 📷    │  ← USB webcam on top of monitor
+         │Webcam │     or mounted at face height
+         └───────┘
+
+    Worker stands here → 🧑 (2-3 feet from camera)
+```
 
 ## Kiosk Plan for Fading West (4 Kiosks)
 
@@ -179,10 +220,11 @@ Flash → SSH → Run setup script (with unique KIOSK_ID) → Enroll workers (on
 ## How It Works Day-to-Day
 
 ### For Workers
-1. Walk up to the kiosk camera
-2. Look at the camera for 2-3 seconds
-3. Blink naturally (liveness check)
-4. See ✅ Welcome message → proceed through door
+1. Walk up to the kiosk (monitor shows "Step toward camera" with live camera feed)
+2. Look at the camera for 2-3 seconds (monitor shows "Blink to verify")
+3. Blink naturally (liveness check prevents photos/videos being used)
+4. Monitor shows **✅ Welcome, [Name]!** with department and time → proceed through door
+5. If not recognized: **❌ Face not recognized — Please see a manager**
 
 ### For Admins
 - **Dashboard** shows who's clocked in/out/absent in real-time
@@ -190,6 +232,23 @@ Flash → SSH → Run setup script (with unique KIOSK_ID) → Enroll workers (on
 - **Reports** page for attendance summaries
 - **Workers** page to manage/deactivate employees
 - **Kiosks** page to monitor kiosk health
+
+### Monitor Display
+
+Each kiosk runs a local web UI (Flask on port 5555) displayed fullscreen via Chromium. The display shows:
+
+- **Live camera feed** — workers see themselves on screen
+- **Status messages** — "Step toward camera", "Blink to verify", "✅ Welcome!", "❌ Not recognized"
+- **Real-time clock** and date
+- **Today's scan log** — recent clock-in/out events
+- **Manual clock** option — type a name if camera has issues
+- **Admin panel** (press 'A' key) — enrolled workers list
+
+The display auto-starts on boot. Two systemd services run:
+1. `fw-gatekeeper-kiosk` — face scanner + Flask web server
+2. `fw-gatekeeper-display` — Chromium fullscreen on HDMI
+
+**Headless mode:** If no monitor is connected, the kiosk still works — it just runs the terminal UI. The face scanner and sync run regardless of display.
 
 ### Offline Mode
 - Kiosks work **without internet** after initial sync
@@ -244,6 +303,27 @@ ls /dev/video*               # should show /dev/video0
 # Force re-sync from server
 sudo systemctl restart fw-gatekeeper-kiosk
 ```
+
+### Monitor shows nothing / black screen
+```bash
+# Check if the display service is running
+systemctl status fw-gatekeeper-display
+
+# Check if the kiosk web server is up
+curl http://localhost:5555/health
+
+# Restart both services
+sudo systemctl restart fw-gatekeeper-kiosk
+sudo systemctl restart fw-gatekeeper-display
+
+# Check HDMI output
+tvservice -s          # should show connected resolution
+```
+
+If monitor doesn't wake up:
+- Check HDMI cable connection
+- Try a different HDMI port on the Pi (Pi 4 has two)
+- Add `hdmi_force_hotplug=1` to `/boot/config.txt` and reboot
 
 ### Power loss recovery
 - Kiosks auto-restart on boot (systemd + watchdog timer)
@@ -333,6 +413,24 @@ python kiosk.py --server URL --kiosk-id ID --camera [auto|pi|usb] --threshold 0.
 | Workers supported | 50+ | 200+ |
 
 ---
+
+## Hardware Shopping List (4 Kiosks)
+
+| Item | Qty | Est. Price | Link |
+|------|-----|-----------|------|
+| Raspberry Pi 4 Model B (2GB) | 4 | $45 each | raspberrypi.com or Amazon |
+| 32GB microSD (Samsung EVO Select) | 4 | $8 each | Amazon |
+| Official Pi 4 USB-C Power Supply | 4 | $8 each | raspberrypi.com |
+| Logitech C270 HD Webcam | 4 | $20 each | Amazon |
+| 7" HDMI Display (1024x600) | 4 | $40-60 each | Amazon (search "7 inch HDMI display Raspberry Pi") |
+| Micro-HDMI to HDMI cable | 4 | $8 each | Amazon |
+| Pi 4 case (VESA mountable) | 4 | $10 each | Amazon |
+| USB 2.0 extension cable 3ft | 4 | $5 each | Amazon |
+| **Total (4 kiosks)** | | **~$580-660** | |
+
+> 💡 **Budget option:** Skip the HDMI displays ($160-240 savings) and run headless with terminal UI. Workers just hear a beep / see a small LED. Less polished but functional.
+
+> 💡 **Premium option:** Use Pi 5 ($60 each) + Logitech C920 ($70 each) for faster recognition and sharper camera image.
 
 ## Services
 

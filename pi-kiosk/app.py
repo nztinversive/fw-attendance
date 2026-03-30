@@ -108,6 +108,11 @@ def video_feed_alias():
     return feed()
 
 
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
 @app.route("/status")
 def status():
     return jsonify(get_status_snapshot())

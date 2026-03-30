@@ -3,3 +3,7 @@ numpy
 Pillow
 picamera2; platform_machine == "aarch64"
 requests
+flask
+opencv-python-headless
+dlib
+scipy

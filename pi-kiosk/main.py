@@ -1,0 +1,305 @@
+#!/usr/bin/env python3
+"""
+FW Gatekeeper — Pi Kiosk Main Entry Point
+
+Runs the face recognition scanner AND the Flask web UI together.
+The web UI shows live camera feed, welcome/denied status, and today's log.
+Connect a monitor via HDMI and run Chromium in kiosk mode for the display.
+
+Usage:
+    python main.py [--server URL] [--kiosk-id ID] [--camera auto|pi|usb]
+"""
+
+import argparse
+import logging
+import os
+import sys
+import time
+import threading
+from datetime import datetime, timedelta
+
+import cv2
+import numpy as np
+
+import config
+import database
+from recognition import FaceRecognizer
+from sync import SyncWorker
+import app as web_app
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("main")
+
+# ─── Camera ────────────────────────────────────────────────────
+
+class Camera:
+    """Camera abstraction — Pi Camera or USB webcam."""
+
+    def __init__(self, mode: str = "auto"):
+        self._cam = None
+        self._mode = mode
+
+    def start(self):
+        if self._mode in ("pi", "auto"):
+            try:
+                from picamera2 import Picamera2
+                self._cam = Picamera2()
+                cam_config = self._cam.create_still_configuration(
+                    main={"size": (config.CAMERA_WIDTH, config.CAMERA_HEIGHT), "format": "RGB888"}
+                )
+                self._cam.configure(cam_config)
+                self._cam.start()
+                time.sleep(1)
+                self._mode = "pi"
+                logger.info("Pi Camera initialized")
+                return
+            except Exception as e:
+                if self._mode == "pi":
+                    raise RuntimeError(f"Pi Camera failed: {e}")
+                logger.info(f"Pi Camera not available ({e}), trying USB...")
+
+        self._cam = cv2.VideoCapture(config.CAMERA_INDEX)
+        self._cam.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
+        self._cam.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
+        if not self._cam.isOpened():
+            raise RuntimeError("No camera available")
+        self._mode = "usb"
+        logger.info("USB Camera initialized")
+
+    def capture_bgr(self) -> np.ndarray:
+        """Capture a frame as BGR numpy array."""
+        if self._mode == "pi":
+            rgb = self._cam.capture_array()
+            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        else:
+            ret, frame = self._cam.read()
+            if not ret:
+                raise RuntimeError("Failed to capture frame")
+            return frame
+
+    def stop(self):
+        if self._cam is None:
+            return
+        if self._mode == "pi":
+            self._cam.stop()
+        else:
+            self._cam.release()
+
+
+# ─── Main Loop ─────────────────────────────────────────────────
+
+def run(args):
+    """Main kiosk loop — face recognition + web UI."""
+
+    # Apply CLI args to config
+    if args.server:
+        config.SERVER_URL = args.server
+    if args.kiosk_id:
+        config.KIOSK_ID = args.kiosk_id
+
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    os.makedirs(config.FACES_DIR, exist_ok=True)
+    os.makedirs(config.MODEL_DIR, exist_ok=True)
+    database.init_db()
+
+    # Start Flask web UI
+    logger.info("Starting web UI on port %d...", config.KIOSK_PORT)
+    web_app.start_server()
+
+    # Init face recognizer
+    recognizer = FaceRecognizer()
+    recognizer.load_faces()
+    logger.info("Loaded %d known faces", recognizer.known_count)
+
+    # Start background sync
+    sync_worker = SyncWorker(recognizer=recognizer)
+    sync_worker.start()
+
+    # Init camera
+    camera = Camera(mode=args.camera)
+    try:
+        camera.start()
+    except RuntimeError as e:
+        logger.error("Camera error: %s", e)
+        web_app.update_status(
+            state="ERROR",
+            message=f"Camera error: {e}",
+            face_detected=False,
+        )
+        # Keep web UI running even without camera
+        while True:
+            time.sleep(60)
+
+    last_clocks: dict[int, datetime] = {}
+    display_until = 0.0
+
+    web_app.update_status(
+        state="IDLE",
+        message="Step toward camera",
+        known_workers=recognizer.known_count,
+        face_detected=False,
+    )
+
+    logger.info("Kiosk ready — scanning for faces")
+
+    try:
+        while True:
+            try:
+                frame = camera.capture_bgr()
+            except Exception as e:
+                logger.error("Capture error: %s", e)
+                time.sleep(1)
+                continue
+
+            now = time.time()
+
+            # Always feed frame to web UI for MJPEG stream
+            web_app.set_frame(frame)
+
+            # Skip recognition during display hold
+            if now < display_until:
+                time.sleep(0.1)
+                continue
+
+            # Run face recognition with liveness
+            name, confidence, liveness_confirmed = recognizer.recognize_with_liveness(frame)
+
+            # Update face detection status
+            face_detected = recognizer.last_face_detected
+            ear = recognizer.current_ear
+
+            if not face_detected:
+                web_app.update_status(
+                    state="IDLE",
+                    message="Step toward camera",
+                    worker_name=None,
+                    action=None,
+                    confidence=0.0,
+                    liveness_confirmed=False,
+                    ear=0.0,
+                    face_detected=False,
+                    known_workers=recognizer.known_count,
+                )
+                time.sleep(0.3)
+                continue
+
+            if not liveness_confirmed:
+                web_app.update_status(
+                    state="WAITING_FOR_BLINK",
+                    message="Blink to verify",
+                    worker_name=None,
+                    action=None,
+                    confidence=0.0,
+                    liveness_confirmed=False,
+                    ear=ear,
+                    face_detected=True,
+                    known_workers=recognizer.known_count,
+                )
+                time.sleep(0.05)
+                continue
+
+            if name is None:
+                web_app.update_status(
+                    state="NOT_RECOGNIZED",
+                    message="❌ Face not recognized",
+                    worker_name=None,
+                    action=None,
+                    confidence=confidence,
+                    liveness_confirmed=True,
+                    ear=ear,
+                    face_detected=True,
+                    known_workers=recognizer.known_count,
+                )
+                display_until = now + config.DISPLAY_TIME_SEC
+                recognizer.reset_liveness()
+                continue
+
+            # Face matched — determine action and log
+            # Get worker ID from recognizer
+            worker_id = None
+            with recognizer._lock:
+                if name in recognizer._names:
+                    idx = recognizer._names.index(name)
+                    worker_id = recognizer._ids[idx]
+
+            if worker_id is None:
+                continue
+
+            # Check cooldown
+            last = last_clocks.get(worker_id)
+            if last and datetime.now() - last < timedelta(minutes=config.CLOCK_DEBOUNCE_MINUTES):
+                web_app.update_status(
+                    state="ALREADY_CLOCKED",
+                    message=f"✅ Already scanned, {name}!",
+                    worker_name=name,
+                    action=None,
+                    confidence=confidence,
+                    liveness_confirmed=True,
+                    ear=ear,
+                    face_detected=True,
+                    known_workers=recognizer.known_count,
+                )
+                display_until = now + config.DISPLAY_TIME_SEC
+                recognizer.reset_liveness()
+                continue
+
+            # Determine clock action
+            if config.KIOSK_TYPE == "entry":
+                action = "clock_in"
+            elif config.KIOSK_TYPE == "exit":
+                action = "clock_out"
+            else:
+                last_action = database.get_last_action(worker_id)
+                action = "clock_out" if last_action == "clock_in" else "clock_in"
+
+            # Log attendance
+            database.log_attendance(
+                worker_id=worker_id,
+                worker_name=name,
+                action=action,
+                liveness_confirmed=True,
+                confidence=confidence,
+            )
+            last_clocks[worker_id] = datetime.now()
+
+            time_str = datetime.now().strftime("%I:%M %p")
+            if action == "clock_in":
+                message = f"✅ Welcome, {name}! — {time_str}"
+            else:
+                message = f"👋 Goodbye, {name}! — {time_str}"
+
+            web_app.update_status(
+                state="CLOCKED_IN",
+                message=message,
+                worker_name=name,
+                action=action,
+                confidence=confidence,
+                liveness_confirmed=True,
+                ear=ear,
+                face_detected=True,
+                known_workers=recognizer.known_count,
+            )
+
+            logger.info("%s: %s (confidence: %.2f)", action.replace("_", " ").title(), name, confidence)
+            display_until = now + config.DISPLAY_TIME_SEC
+            recognizer.reset_liveness()
+
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        camera.stop()
+        sync_worker.stop()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="FW Gatekeeper Pi Kiosk")
+    parser.add_argument("--server", default=None, help="Gatekeeper server URL")
+    parser.add_argument("--kiosk-id", default=None, help="Unique kiosk identifier")
+    parser.add_argument("--camera", choices=["auto", "pi", "usb"], default="auto", help="Camera type")
+
+    args = parser.parse_args()
+    run(args)
