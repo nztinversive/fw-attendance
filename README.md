@@ -160,16 +160,22 @@ sudo KIOSK_ID=kiosk-exit-2 KIOSK_NAME="Loading Dock" KIOSK_TYPE=exit bash setup.
 
 > ⏱ Setup takes **15-25 minutes** per Pi (mostly compiling dlib). Go set up the next Pi while this one builds.
 
-## Step 4: Verify Camera
+## Step 4: Connect the Hardware
 
-After setup completes, test the camera:
+Before running setup (or after — order doesn't matter):
+
+1. **Plug in the USB webcam** — top of monitor or mounted at face height
+2. **Connect HDMI cable** — Pi micro-HDMI port → monitor HDMI input
+3. **Power on the monitor** — set to correct HDMI input
+
+Verify the camera is detected:
 
 ```bash
-# Pi Camera
-libcamera-hello --timeout 5000
-
 # USB Webcam
 ls /dev/video*   # should show /dev/video0
+
+# Pi Camera
+libcamera-hello --timeout 5000
 ```
 
 ## Step 5: Enroll Workers on the Dashboard
@@ -189,31 +195,40 @@ Before the kiosks can recognize anyone, enroll workers:
 ## Step 6: Start the Kiosks
 
 ```bash
-# Start the kiosk service
+# Start the face scanner + web UI
 sudo systemctl start fw-gatekeeper-kiosk
 
-# Check it's running
+# Start the HDMI display (Chromium fullscreen)
+sudo systemctl start fw-gatekeeper-display
+
+# Check both are running
 systemctl status fw-gatekeeper-kiosk
+systemctl status fw-gatekeeper-display
 
 # Watch the logs
 journalctl -u fw-gatekeeper-kiosk -f
 ```
 
 On first start, the kiosk will:
-1. Sync worker encodings from the server
-2. Cache them locally in SQLite
-3. Start the camera and begin face scanning
-4. Show ✅ Welcome or ❌ Not Recognized on the terminal
+1. Start Flask web UI on port 5555
+2. Sync worker encodings from the server
+3. Cache them locally in SQLite
+4. Start the camera and begin face scanning
+5. Chromium launches fullscreen on the HDMI monitor showing the live UI
 
-Then **reboot** to verify auto-start works:
+The monitor should show the FW Gatekeeper display with live camera feed, clock, and "Step toward camera" status.
+
+Then **reboot** to verify everything auto-starts on power-on:
 
 ```bash
 sudo reboot
 ```
 
+After reboot, the monitor should come up with the kiosk display automatically — no SSH or manual start needed.
+
 ## Step 7: Repeat for All 4 Kiosks
 
-Flash → SSH → Run setup script (with unique KIOSK_ID) → Enroll workers (only once, on the web) → Start → Reboot.
+Flash → SSH → Connect hardware → Run setup script (with unique KIOSK_ID) → Enroll workers (only once, on the web) → Start → Reboot → Verify monitor displays kiosk UI.
 
 ---
 
