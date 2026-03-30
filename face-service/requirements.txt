@@ -1,5 +1,6 @@
 fastapi
-uvicorn
+uvicorn[standard]
 numpy
 Pillow
-face_recognition
+opencv-python-headless
+onnxruntime
