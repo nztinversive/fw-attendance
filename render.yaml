@@ -8,3 +8,5 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NEXT_PUBLIC_CONVEX_URL
+        value: https://modest-bat-146.convex.cloud
