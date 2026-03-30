@@ -1,16 +1,19 @@
 FROM python:3.11-slim
 
-# Install system deps for dlib/face_recognition
+# Runtime deps only (no cmake/build-essential — we use pre-built dlib wheel)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    libopenblas-dev \
-    liblapack-dev \
-    libx11-dev \
+    libopenblas0 \
+    liblapack3 \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# Install dlib from pre-built wheel (avoids 512MB RAM cmake OOM on free tier)
+RUN pip install --no-cache-dir dlib-bin
+
+# face_recognition will see dlib already installed and skip building it
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
