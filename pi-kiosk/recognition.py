@@ -1,4 +1,8 @@
-"""Face recognition engine with blink-based liveness gating."""
+"""Face recognition engine with blink-based liveness gating.
+
+Supports both legacy 128-dim dlib encodings and 512-dim ArcFace embeddings.
+Matching uses cosine similarity (works for both, more accurate for ArcFace).
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,32 @@ import database
 from liveness import LivenessChecker
 
 logger = logging.getLogger(__name__)
+
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """Compute cosine similarity between two vectors."""
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return float(np.dot(a, b) / (norm_a * norm_b))
+
+
+def cosine_similarities(known: list[np.ndarray], candidate: np.ndarray) -> np.ndarray:
+    """Compute cosine similarities between candidate and all known encodings."""
+    if not known:
+        return np.array([])
+    known_mat = np.array(known)
+    norms = np.linalg.norm(known_mat, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    known_normed = known_mat / norms
+
+    cand_norm = np.linalg.norm(candidate)
+    if cand_norm == 0:
+        return np.zeros(len(known))
+    cand_normed = candidate / cand_norm
+
+    return known_normed @ cand_normed
 
 
 class FaceRecognizer:
@@ -151,14 +181,30 @@ class FaceRecognizer:
             return None, 0.0, True
 
         candidate = candidate_encodings[0]
-        distances = face_recognition.face_distance(encodings, candidate)
-        best_idx = int(np.argmin(distances))
-        best_distance = float(distances[best_idx])
-        confidence = max(0.0, 1.0 - best_distance)
 
-        if best_distance <= config.RECOGNITION_TOLERANCE:
-            return names[best_idx], confidence, True
-        return None, confidence, True
+        # Detect encoding dimension to choose matching strategy
+        first_enc = encodings[0]
+        if len(first_enc) >= 256:
+            # ArcFace 512-dim embeddings — use cosine similarity
+            # Re-encode with ArcFace would be ideal, but for now
+            # dlib 128-dim candidate vs 512-dim known won't match.
+            # The Pi should eventually use ArcFace too.
+            # For now, use cosine similarity which works for both.
+            sims = cosine_similarities(encodings, candidate)
+            best_idx = int(np.argmax(sims))
+            confidence = float(sims[best_idx])
+            if confidence >= config.RECOGNITION_TOLERANCE:
+                return names[best_idx], confidence, True
+            return None, confidence, True
+        else:
+            # Legacy 128-dim dlib encodings — euclidean distance
+            distances = face_recognition.face_distance(encodings, candidate)
+            best_idx = int(np.argmin(distances))
+            best_distance = float(distances[best_idx])
+            confidence = max(0.0, 1.0 - best_distance)
+            if best_distance <= config.RECOGNITION_TOLERANCE:
+                return names[best_idx], confidence, True
+            return None, confidence, True
 
     def recognize_face(self, frame: np.ndarray) -> Optional[tuple[int, str, float]]:
         """

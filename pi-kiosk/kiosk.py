@@ -168,7 +168,12 @@ class EncodingStore:
             return False
 
     def match(self, face_encoding: np.ndarray, threshold: float = MATCH_THRESHOLD) -> Optional[dict]:
-        """Match a face encoding against known workers. Returns {id, name, confidence} or None."""
+        """Match a face encoding against known workers.
+        
+        Supports both 128-dim (dlib) and 512-dim (ArcFace) encodings.
+        Uses cosine similarity for ArcFace, euclidean distance for dlib.
+        Returns {id, name, confidence} or None.
+        """
         if not self.workers:
             return None
 
@@ -183,20 +188,53 @@ class EncodingStore:
         if not known_encodings:
             return None
 
-        distances = face_recognition.face_distance(known_encodings, face_encoding)
-        best_idx = int(np.argmin(distances))
-        best_dist = distances[best_idx]
+        # Detect encoding type by dimension
+        enc_dim = len(known_encodings[0])
 
-        if best_dist > threshold:
-            return None
+        if enc_dim >= 256:
+            # ArcFace 512-dim — cosine similarity matching
+            known_mat = np.array(known_encodings)
+            norms = np.linalg.norm(known_mat, axis=1, keepdims=True)
+            norms[norms == 0] = 1
+            known_normed = known_mat / norms
 
-        wid = known_ids[best_idx]
-        return {
-            "id": wid,
-            "name": self.workers[wid]["name"],
-            "department": self.workers[wid].get("department", ""),
-            "confidence": round(1.0 - best_dist, 4),
-        }
+            cand_norm = np.linalg.norm(face_encoding)
+            if cand_norm == 0:
+                return None
+            cand_normed = face_encoding / cand_norm
+
+            similarities = known_normed @ cand_normed
+            best_idx = int(np.argmax(similarities))
+            best_sim = float(similarities[best_idx])
+
+            # ArcFace cosine threshold (0.4 = permissive, 0.55 = strict)
+            cosine_threshold = max(0.4, threshold)
+            if best_sim < cosine_threshold:
+                return None
+
+            wid = known_ids[best_idx]
+            return {
+                "id": wid,
+                "name": self.workers[wid]["name"],
+                "department": self.workers[wid].get("department", ""),
+                "confidence": round(best_sim, 4),
+            }
+        else:
+            # Legacy 128-dim dlib — euclidean distance
+            distances = face_recognition.face_distance(known_encodings, face_encoding)
+            best_idx = int(np.argmin(distances))
+            best_dist = distances[best_idx]
+
+            if best_dist > threshold:
+                return None
+
+            wid = known_ids[best_idx]
+            return {
+                "id": wid,
+                "name": self.workers[wid]["name"],
+                "department": self.workers[wid].get("department", ""),
+                "confidence": round(1.0 - best_dist, 4),
+            }
 
 
 # ─── Attendance Logger ─────────────────────────────────────────
