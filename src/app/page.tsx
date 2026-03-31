@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import StatsBar from '@/components/StatsBar';
 import WorkerCard from '@/components/WorkerCard';
+import { DashboardSkeleton } from '@/components/Skeleton';
 
 interface WorkerWithStatus {
   id: string;
@@ -17,8 +18,11 @@ export default function Dashboard() {
   const [workers, setWorkers] = useState<WorkerWithStatus[]>([]);
   const [search, setSearch] = useState('');
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
     try {
       const [statsRes, workersRes, attendanceRes] = await Promise.all([
         fetch('/api/stats'),
@@ -32,7 +36,6 @@ export default function Dashboard() {
 
       setStats(statsData);
 
-      // Build status map: latest event per worker
       const statusMap = new Map<string, { event_type: string; timestamp: string }>();
       for (const e of attendanceData) {
         const existing = statusMap.get(e.worker_id);
@@ -54,7 +57,6 @@ export default function Dashboard() {
         return { ...w, status, clockInTime };
       });
 
-      // Sort: in first, then out, then absent
       enriched.sort((a, b) => {
         const order = { in: 0, out: 1, absent: 2 };
         return order[a.status] - order[b.status];
@@ -64,14 +66,21 @@ export default function Dashboard() {
       setLastUpdated(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (err) {
       console.error('Failed to fetch dashboard data', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 10000);
+    const interval = setInterval(() => fetchData(true), 10000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
 
   const filtered = workers.filter(
     (w) =>
@@ -89,8 +98,10 @@ export default function Dashboard() {
           </h1>
           <div className="flex items-center gap-3 mt-2">
             <span className="flex items-center gap-1.5">
-              <span className="status-dot-pulse bg-emerald-400" />
-              <span className="text-xs font-mono text-slate-500">Live</span>
+              <span className={`status-dot bg-emerald-400 ${refreshing ? 'refresh-pulse' : 'animate-pulse-slow'}`} />
+              <span className="text-xs font-mono text-slate-500">
+                {refreshing ? 'Syncing...' : 'Live'}
+              </span>
             </span>
             {lastUpdated && (
               <span className="text-xs font-mono text-slate-600">Updated {lastUpdated}</span>
@@ -127,8 +138,21 @@ export default function Dashboard() {
 
       {filtered.length === 0 && workers.length > 0 && (
         <div className="text-center py-12 text-slate-500">
+          <svg className="w-12 h-12 text-slate-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
           <p className="font-display text-lg">No workers match your search</p>
           <p className="text-sm mt-1">Try a different name or department</p>
+        </div>
+      )}
+
+      {workers.length === 0 && !loading && (
+        <div className="text-center py-16">
+          <svg className="w-16 h-16 text-slate-700 mx-auto mb-4" fill="none" viewBox="0 0 24 24" strokeWidth={0.75} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+          </svg>
+          <p className="font-display text-lg text-slate-400">No workers registered</p>
+          <p className="text-sm text-slate-600 mt-1">Add workers from the Workers page to see them here</p>
         </div>
       )}
     </div>

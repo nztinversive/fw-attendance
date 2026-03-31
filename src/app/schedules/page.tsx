@@ -2,10 +2,12 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Schedule } from '@/lib/types';
+import { useToast } from '@/components/Toast';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function SchedulesPage() {
+  const { toast } = useToast();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -55,24 +57,38 @@ export default function SchedulesPage() {
   };
 
   const handleSubmit = async () => {
-    if (!name.trim() || days.length === 0) return;
-
-    const body = { id: editId, name, days, start_time: startTime, end_time: endTime, department: department || null };
-
-    if (editId) {
-      await fetch('/api/schedules', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    } else {
-      await fetch('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!name.trim() || days.length === 0) {
+      toast('Schedule name and at least one day required', 'error');
+      return;
     }
 
-    resetForm();
-    fetchSchedules();
+    try {
+      const body = { id: editId, name, days, start_time: startTime, end_time: endTime, department: department || null };
+
+      if (editId) {
+        await fetch('/api/schedules', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        toast(`Schedule "${name}" updated`);
+      } else {
+        await fetch('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        toast(`Schedule "${name}" created`);
+      }
+
+      resetForm();
+      fetchSchedules();
+    } catch {
+      toast('Failed to save schedule', 'error');
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this schedule?')) return;
-    await fetch(`/api/schedules?id=${id}`, { method: 'DELETE' });
-    fetchSchedules();
+    try {
+      await fetch(`/api/schedules?id=${id}`, { method: 'DELETE' });
+      toast('Schedule deleted');
+      fetchSchedules();
+    } catch {
+      toast('Failed to delete schedule', 'error');
+    }
   };
 
   const parseDays = (daysJson: string): string => {

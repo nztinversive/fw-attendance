@@ -1,6 +1,7 @@
 'use client';
 
 import { DashboardStats } from '@/lib/types';
+import { useAnimatedCounter } from '@/hooks/useAnimatedCounter';
 
 const StatIcon = ({ type }: { type: string }) => {
   if (type === 'total') return (
@@ -25,6 +26,11 @@ const StatIcon = ({ type }: { type: string }) => {
   );
 };
 
+function AnimatedNumber({ value, color }: { value: number; color: string }) {
+  const animated = useAnimatedCounter(value);
+  return <span className={`text-3xl font-display font-bold tabular-nums ${color}`}>{animated}</span>;
+}
+
 export default function StatsBar({ stats }: { stats: DashboardStats & { avgArrival?: string | null } }) {
   const items = [
     { label: 'Total Workers', value: stats.totalWorkers, color: 'text-gold', bg: 'bg-gold/8', border: 'border-gold/15', iconType: 'total', iconColor: 'text-gold/60' },
@@ -47,9 +53,7 @@ export default function StatsBar({ stats }: { stats: DashboardStats & { avgArriv
               </span>
             </div>
           </div>
-          <div className={`text-3xl font-display font-bold tabular-nums ${item.color}`}>
-            {item.value}
-          </div>
+          <AnimatedNumber value={item.value} color={item.color} />
           <div className="section-label mt-1">{item.label}</div>
         </div>
       ))}

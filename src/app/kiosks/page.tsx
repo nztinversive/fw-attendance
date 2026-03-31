@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Kiosk } from '@/lib/types';
+import { useToast } from '@/components/Toast';
 
 export default function KiosksPage() {
+  const { toast } = useToast();
   const [kiosks, setKiosks] = useState<Kiosk[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
@@ -23,14 +25,19 @@ export default function KiosksPage() {
   useEffect(() => { fetchKiosks(); }, [fetchKiosks]);
 
   const handleSubmit = async () => {
-    if (!name.trim()) return alert('Name required');
-    await fetch('/api/kiosks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, type, location }),
-    });
-    setName(''); setLocation(''); setShowForm(false);
-    fetchKiosks();
+    if (!name.trim()) { toast('Kiosk name required', 'error'); return; }
+    try {
+      await fetch('/api/kiosks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type, location }),
+      });
+      toast(`Kiosk "${name}" registered`);
+      setName(''); setLocation(''); setShowForm(false);
+      fetchKiosks();
+    } catch {
+      toast('Failed to register kiosk', 'error');
+    }
   };
 
   return (

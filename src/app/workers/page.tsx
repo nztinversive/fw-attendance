@@ -2,9 +2,11 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import WebcamCapture from '@/components/WebcamCapture';
+import { useToast } from '@/components/Toast';
 import { Worker } from '@/lib/types';
 
 export default function WorkersPage() {
+  const { toast } = useToast();
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -33,30 +35,44 @@ export default function WorkersPage() {
   };
 
   const handleSubmit = async () => {
-    if (!name.trim()) return alert('Name is required');
-
-    if (editId) {
-      await fetch('/api/workers', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: editId, name, department, ...(photo ? { photo } : {}) }),
-      });
-    } else {
-      await fetch('/api/workers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, department, ...(photo ? { photo } : {}) }),
-      });
+    if (!name.trim()) {
+      toast('Name is required', 'error');
+      return;
     }
 
-    setName(''); setDepartment(''); setPhoto(''); setShowForm(false); setEditId(null);
-    fetchWorkers();
+    try {
+      if (editId) {
+        await fetch('/api/workers', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: editId, name, department, ...(photo ? { photo } : {}) }),
+        });
+        toast(`${name} updated successfully`);
+      } else {
+        await fetch('/api/workers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, department, ...(photo ? { photo } : {}) }),
+        });
+        toast(`${name} enrolled successfully`);
+      }
+
+      setName(''); setDepartment(''); setPhoto(''); setShowForm(false); setEditId(null);
+      fetchWorkers();
+    } catch {
+      toast('Failed to save worker', 'error');
+    }
   };
 
   const deactivate = async (id: string) => {
     if (!confirm('Deactivate this worker?')) return;
-    await fetch(`/api/workers?id=${id}`, { method: 'DELETE' });
-    fetchWorkers();
+    try {
+      await fetch(`/api/workers?id=${id}`, { method: 'DELETE' });
+      toast('Worker deactivated');
+      fetchWorkers();
+    } catch {
+      toast('Failed to deactivate worker', 'error');
+    }
   };
 
   const startEdit = (w: Worker) => {
