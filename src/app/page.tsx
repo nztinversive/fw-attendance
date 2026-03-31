@@ -16,6 +16,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState({ totalWorkers: 0, clockedIn: 0, clockedOut: 0, notArrived: 0, avgArrival: null as string | null });
   const [workers, setWorkers] = useState<WorkerWithStatus[]>([]);
   const [search, setSearch] = useState('');
+  const [lastUpdated, setLastUpdated] = useState<string>('');
 
   const fetchData = useCallback(async () => {
     try {
@@ -60,6 +61,7 @@ export default function Dashboard() {
       });
 
       setWorkers(enriched);
+      setLastUpdated(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (err) {
       console.error('Failed to fetch dashboard data', err);
     }
@@ -78,31 +80,57 @@ export default function Dashboard() {
   );
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">
-          <span className="text-gold">FW</span> Live Board
-        </h1>
-        {stats.avgArrival && (
-          <span className="text-xs text-gray-500">Avg arrival: {stats.avgArrival}</span>
-        )}
+    <div className="animate-fade-in">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-8 flex-wrap gap-4">
+        <div>
+          <h1 className="page-title text-slate-100">
+            Live <span className="text-gold">Dashboard</span>
+          </h1>
+          <div className="flex items-center gap-3 mt-2">
+            <span className="flex items-center gap-1.5">
+              <span className="status-dot-pulse bg-emerald-400" />
+              <span className="text-xs font-mono text-slate-500">Live</span>
+            </span>
+            {lastUpdated && (
+              <span className="text-xs font-mono text-slate-600">Updated {lastUpdated}</span>
+            )}
+            {stats.avgArrival && (
+              <span className="text-xs font-mono text-slate-600">Avg arrival {stats.avgArrival}</span>
+            )}
+          </div>
+        </div>
       </div>
 
       <StatsBar stats={stats} />
 
-      <input
-        type="text"
-        placeholder="Search by name or department..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full md:w-80 mb-4 px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm focus:outline-none focus:border-gold/50"
-      />
+      {/* Search */}
+      <div className="relative mb-6">
+        <svg className="w-4 h-4 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+        </svg>
+        <input
+          type="text"
+          placeholder="Search workers by name or department..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="input-field pl-11 w-full md:w-96"
+        />
+      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      {/* Worker grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {filtered.map((w) => (
           <WorkerCard key={w.id} name={w.name} department={w.department} status={w.status} clockInTime={w.clockInTime} />
         ))}
       </div>
+
+      {filtered.length === 0 && workers.length > 0 && (
+        <div className="text-center py-12 text-slate-500">
+          <p className="font-display text-lg">No workers match your search</p>
+          <p className="text-sm mt-1">Try a different name or department</p>
+        </div>
+      )}
     </div>
   );
 }

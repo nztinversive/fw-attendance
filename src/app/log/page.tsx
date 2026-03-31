@@ -30,28 +30,31 @@ export default function LogPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h1 className="text-2xl font-bold">
-          <span className="text-gold">Gatekeeper</span> Log
-        </h1>
+    <div className="animate-fade-in">
+      <div className="flex items-start justify-between mb-8 flex-wrap gap-4">
+        <div>
+          <h1 className="page-title text-slate-100">
+            Activity <span className="text-gold">Log</span>
+          </h1>
+          <p className="text-sm text-slate-500 mt-1 font-mono">{events.length} events recorded</p>
+        </div>
         <div className="flex items-center gap-3">
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-sm focus:outline-none focus:border-gold/50"
+            className="input-field w-auto"
           />
-          <button
-            onClick={exportCSV}
-            className="px-3 py-1.5 bg-gold hover:bg-gold-light text-black rounded-lg text-sm font-medium"
-          >
+          <button onClick={exportCSV} className="btn-primary flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
             Export CSV
           </button>
         </div>
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div className="glass-card overflow-hidden">
         <AttendanceTable events={events} />
       </div>
     </div>

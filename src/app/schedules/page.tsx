@@ -84,42 +84,59 @@ export default function SchedulesPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">
-          <span className="text-gold">📅</span> Schedules
-        </h1>
+    <div className="animate-fade-in">
+      <div className="flex items-start justify-between mb-8 flex-wrap gap-4">
+        <div>
+          <h1 className="page-title text-slate-100">
+            Work <span className="text-gold">Schedules</span>
+          </h1>
+          <p className="text-sm text-slate-500 mt-1 font-mono">{schedules.length} active schedules</p>
+        </div>
         <button
           onClick={() => { resetForm(); setShowForm(!showForm); }}
-          className="px-4 py-2 bg-gold/20 text-gold border border-gold/30 rounded-lg text-sm font-medium hover:bg-gold/30 transition-colors"
+          className={showForm ? 'btn-secondary' : 'btn-primary flex items-center gap-2'}
         >
-          {showForm ? 'Cancel' : '+ New Schedule'}
+          {showForm ? 'Cancel' : (
+            <>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              New Schedule
+            </>
+          )}
         </button>
       </div>
 
       {showForm && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6 space-y-4">
+        <div className="glass-card p-6 mb-8 space-y-5 animate-slide-up">
+          <h2 className="font-display font-semibold text-gold flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+            </svg>
+            {editId ? 'Edit Schedule' : 'New Schedule'}
+          </h2>
+
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Schedule Name</label>
+            <label className="section-label mb-1.5 block">Schedule Name</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Default Mon-Fri"
-              className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-sm focus:outline-none focus:border-gold/50"
+              className="input-field"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-gray-400 mb-2">Days</label>
+            <label className="section-label mb-2 block">Days of Week</label>
             <div className="flex gap-2">
               {DAY_LABELS.map((label, i) => (
                 <button
                   key={i}
                   onClick={() => toggleDay(i)}
-                  className={`w-10 h-10 rounded-lg text-xs font-medium transition-colors ${
+                  className={`w-11 h-11 rounded-xl text-xs font-display font-medium transition-all ${
                     days.includes(i)
-                      ? 'bg-gold/20 text-gold border border-gold/40'
-                      : 'bg-gray-950 text-gray-500 border border-gray-800 hover:border-gray-700'
+                      ? 'bg-gold/15 text-gold border border-gold/25 shadow-sm shadow-gold/5'
+                      : 'bg-navy-900/80 text-slate-500 border border-navy-600/50 hover:border-slate-600'
                   }`}
                 >
                   {label}
@@ -130,31 +147,31 @@ export default function SchedulesPage() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Start Time</label>
+              <label className="section-label mb-1.5 block">Start Time</label>
               <input
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-sm focus:outline-none focus:border-gold/50"
+                className="input-field font-mono"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">End Time</label>
+              <label className="section-label mb-1.5 block">End Time</label>
               <input
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-sm focus:outline-none focus:border-gold/50"
+                className="input-field font-mono"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Department (optional — blank = all)</label>
+            <label className="section-label mb-1.5 block">Department (optional)</label>
             <select
               value={department}
               onChange={(e) => setDepartment(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-sm focus:outline-none focus:border-gold/50"
+              className="input-field"
             >
               <option value="">All Departments</option>
               {departments.map((d) => (
@@ -166,7 +183,7 @@ export default function SchedulesPage() {
           <button
             onClick={handleSubmit}
             disabled={!name.trim() || days.length === 0}
-            className="px-5 py-2 bg-gold text-gray-950 rounded-lg text-sm font-semibold hover:bg-gold/90 transition-colors disabled:opacity-40"
+            className="btn-primary"
           >
             {editId ? 'Update Schedule' : 'Create Schedule'}
           </button>
@@ -174,31 +191,45 @@ export default function SchedulesPage() {
       )}
 
       {schedules.length === 0 ? (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
-          <p className="text-gray-500 text-sm">No schedules yet. Create one to enable daily tracking.</p>
+        <div className="glass-card p-12 text-center">
+          <svg className="w-12 h-12 text-slate-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+          </svg>
+          <p className="text-slate-400 font-display">No schedules yet</p>
+          <p className="text-xs text-slate-600 mt-1">Create one to enable daily attendance tracking</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {schedules.map((s) => (
-            <div key={s.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between">
-              <div>
-                <div className="font-medium">{s.name}</div>
-                <div className="text-sm text-gray-400 mt-1">
-                  {parseDays(s.days)} · {s.start_time} – {s.end_time}
-                  {s.department && <span className="ml-2 text-gold/70">({s.department})</span>}
+          {schedules.map((s, i) => (
+            <div key={s.id} className={`glass-card-hover p-5 flex items-center justify-between animate-fade-in stagger-${Math.min(i + 1, 6)}`}>
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/15 flex items-center justify-center text-gold">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="font-display font-medium text-slate-200">{s.name}</div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs font-mono text-slate-400">{parseDays(s.days)}</span>
+                    <span className="text-slate-600">&middot;</span>
+                    <span className="text-xs font-mono text-gold tabular-nums">{s.start_time} &ndash; {s.end_time}</span>
+                    {s.department && (
+                      <>
+                        <span className="text-slate-600">&middot;</span>
+                        <span className="badge text-[10px] bg-gold/10 text-gold/70 border border-gold/15">{s.department}</span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleEdit(s)}
-                  className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
-                >
-                  Edit
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => handleEdit(s)} className="btn-ghost text-xs">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                  </svg>
                 </button>
-                <button
-                  onClick={() => handleDelete(s.id)}
-                  className="px-3 py-1.5 text-xs bg-red-900/30 text-red-400 hover:bg-red-900/50 rounded-lg transition-colors"
-                >
+                <button onClick={() => handleDelete(s.id)} className="px-3 py-1.5 text-xs rounded-xl bg-red-400/5 border border-red-400/10 text-red-400 hover:bg-red-400/10 transition-all">
                   Delete
                 </button>
               </div>

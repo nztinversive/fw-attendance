@@ -9,25 +9,55 @@ interface WorkerCardProps {
 
 export default function WorkerCard({ name, department, status, clockInTime }: WorkerCardProps) {
   const initials = name.split(' ').map((n) => n[0]).join('').slice(0, 2);
-  const dotColor = status === 'in' ? 'bg-green-400' : status === 'out' ? 'bg-orange-400' : 'bg-gray-600';
-  const statusText = status === 'in' ? 'Clocked In' : status === 'out' ? 'Clocked Out' : 'Not Arrived';
+
+  const statusConfig = {
+    in: {
+      dot: 'bg-emerald-400',
+      pulse: true,
+      text: 'On Site',
+      badge: 'bg-emerald-400/10 text-emerald-400 border-emerald-400/20',
+      ring: 'ring-emerald-400/20',
+      initialsColor: 'text-emerald-400',
+      initialsBg: 'bg-emerald-400/10 border-emerald-400/20',
+    },
+    out: {
+      dot: 'bg-amber-400',
+      pulse: false,
+      text: 'Clocked Out',
+      badge: 'bg-amber-400/10 text-amber-400 border-amber-400/20',
+      ring: 'ring-amber-400/20',
+      initialsColor: 'text-amber-400',
+      initialsBg: 'bg-amber-400/10 border-amber-400/20',
+    },
+    absent: {
+      dot: 'bg-slate-600',
+      pulse: false,
+      text: 'Not Arrived',
+      badge: 'bg-slate-500/10 text-slate-500 border-slate-500/20',
+      ring: 'ring-slate-500/10',
+      initialsColor: 'text-slate-500',
+      initialsBg: 'bg-slate-500/5 border-slate-600/20',
+    },
+  };
+
+  const cfg = statusConfig[status];
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 hover:border-gold/30 transition-colors">
-      <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-sm font-bold text-gold shrink-0">
+    <div className="glass-card-hover p-4 flex items-center gap-3.5 group">
+      <div className={`w-10 h-10 rounded-xl ${cfg.initialsBg} border flex items-center justify-center text-xs font-display font-bold ${cfg.initialsColor} shrink-0 transition-colors`}>
         {initials}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="font-medium text-sm truncate">{name}</div>
-        <div className="text-xs text-gray-500">{department}</div>
+        <div className="font-display font-medium text-sm text-slate-200 truncate">{name}</div>
+        <div className="text-xs text-slate-500 font-mono">{department || 'Unassigned'}</div>
       </div>
-      <div className="text-right shrink-0">
-        <div className="flex items-center gap-1.5 justify-end">
-          <span className={`w-2 h-2 rounded-full ${dotColor}`} />
-          <span className="text-xs text-gray-400">{statusText}</span>
-        </div>
+      <div className="text-right shrink-0 flex flex-col items-end gap-1">
+        <span className={`badge text-[11px] border ${cfg.badge}`}>
+          <span className={`status-dot ${cfg.dot} ${cfg.pulse ? 'animate-pulse-slow' : ''}`} />
+          {cfg.text}
+        </span>
         {clockInTime && (
-          <div className="text-[10px] text-gray-600 mt-0.5">{clockInTime}</div>
+          <span className="text-[10px] font-mono text-slate-500 tabular-nums">{clockInTime}</span>
         )}
       </div>
     </div>
