@@ -110,7 +110,7 @@ Factory access control system for Fading West. Face recognition at entry/exit po
 ## Step 1: Flash Raspberry Pi OS
 
 1. Download [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-2. Choose **Raspberry Pi OS Lite (64-bit)** (no desktop needed)
+2. Choose **Raspberry Pi OS with Desktop (64-bit)** — NOT Lite (we need X server + Chromium for the monitor display)
 3. Click the ⚙️ gear icon and configure:
    - **Hostname:** `fw-kiosk-1` (increment for each Pi: `fw-kiosk-2`, etc.)
    - **Enable SSH:** Yes, use password authentication
@@ -119,7 +119,9 @@ Factory access control system for Fading West. Face recognition at entry/exit po
    - **WiFi:** enter your facility's WiFi SSID + password
    - **Locale:** set your timezone
 4. Flash to microSD card
-5. Insert card into Pi, connect camera, power on
+5. Insert card into Pi, connect camera + HDMI monitor, power on
+
+> ⚠️ **Why Desktop and not Lite?** The kiosk displays a fullscreen Chromium browser on the HDMI monitor showing live camera feed + welcome messages. This requires X server and GPU drivers, which come pre-installed with the Desktop version. Lite would need ~15 min of extra package installs and is more prone to driver issues.
 
 ## Step 2: SSH Into the Pi
 
