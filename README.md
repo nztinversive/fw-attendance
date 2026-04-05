@@ -123,9 +123,19 @@ Factory access control system for Fading West. Face recognition at entry/exit po
 
 > ⚠️ **Why Desktop and not Lite?** The kiosk displays a fullscreen Chromium browser on the HDMI monitor showing live camera feed + welcome messages. This requires X server and GPU drivers, which come pre-installed with the Desktop version. Lite would need ~15 min of extra package installs and is more prone to driver issues.
 
-## Step 2: SSH Into the Pi
+## Step 2: Open a Terminal
 
-Wait 1-2 minutes for first boot, then:
+You have two options — use whichever is easier for you:
+
+### Option A: Directly on the Pi (Desktop)
+
+1. The Pi should boot to the desktop with a monitor connected
+2. If you see a keyring prompt, **leave both fields blank** and click Continue
+3. Click the **Terminal** icon in the top menu bar (black rectangle icon), or right-click the desktop → "Open Terminal Here"
+
+### Option B: SSH from Another Computer
+
+From your PC (Pi must be on the same WiFi network):
 
 ```bash
 ssh pi@fw-kiosk-1.local
@@ -138,6 +148,8 @@ ssh pi@192.168.1.XXX
 ```
 
 ## Step 3: Run the Setup Script
+
+Once you have a terminal open (either on the Pi desktop or via SSH), run these commands.
 
 For the **first kiosk** (Main Entry):
 
@@ -161,6 +173,8 @@ sudo KIOSK_ID=kiosk-exit-2 KIOSK_NAME="Loading Dock" KIOSK_TYPE=exit bash setup.
 ```
 
 > ⏱ Setup takes **15-25 minutes** per Pi (mostly compiling dlib). Go set up the next Pi while this one builds.
+> 
+> 💡 **Tip:** If typing long commands on the Pi is annoying, you can open the Chromium browser on the Pi desktop, go to the [README on GitHub](https://github.com/nztinversive/fw-gatekeeper), and copy-paste the commands from there.
 
 ## Step 4: Connect the Hardware
 
