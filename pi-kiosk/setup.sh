@@ -44,13 +44,6 @@ apt-get upgrade -y -qq
 
 # ─── 2. Install Dependencies ───────────────────────────────────
 echo "[2/8] Installing dependencies..."
-# Detect package names (changed between Pi OS versions)
-if apt-cache show chromium >/dev/null 2>&1; then
-  CHROMIUM_PKG="chromium"
-else
-  CHROMIUM_PKG="chromium-browser"
-fi
-
 apt-get install -y -qq \
   python3 python3-pip python3-venv python3-dev \
   cmake build-essential \
@@ -61,8 +54,7 @@ apt-get install -y -qq \
   python3-picamera2 \
   sqlite3 \
   curl wget git \
-  xserver-xorg x11-xserver-utils xinit \
-  $CHROMIUM_PKG \
+  firefox-esr \
   unclutter
 
 # ─── 3. Install Kiosk Application ──────────────────────────────
@@ -150,7 +142,7 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# Chromium kiosk display (fullscreen browser on HDMI monitor)
+# Firefox kiosk display (fullscreen browser on HDMI monitor)
 cat > /etc/systemd/system/fw-gatekeeper-display.service << EOF
 [Unit]
 Description=FW Gatekeeper Display ($KIOSK_NAME)
@@ -161,28 +153,9 @@ Requires=fw-gatekeeper-kiosk.service
 Type=simple
 User=$KIOSK_USER
 Environment=DISPLAY=:0
+Environment=MOZ_ENABLE_WAYLAND=1
 ExecStartPre=/bin/bash -c 'for i in \$(seq 1 30); do curl -sf http://localhost:5555/health >/dev/null 2>&1 && exit 0; sleep 2; done; exit 1'
-ExecStart=/bin/bash -c '\\
-  xinit /bin/bash -c "\\
-    xset s off; \\
-    xset -dpms; \\
-    xset s noblank; \\
-    unclutter -idle 0.5 -root & \\
-    chromium-browser \\
-      --noerrdialogs \\
-      --disable-infobars \\
-      --kiosk \\
-      --incognito \\
-      --disable-translate \\
-      --disable-features=TranslateUI \\
-      --disable-session-crashed-bubble \\
-      --disable-component-update \\
-      --check-for-update-interval=31536000 \\
-      --autoplay-policy=no-user-gesture-required \\
-      --no-first-run \\
-      --start-fullscreen \\
-      http://localhost:5555 \\
-  " -- :0'
+ExecStart=/usr/bin/firefox-esr --kiosk http://localhost:5555
 Restart=always
 RestartSec=10
 StandardOutput=journal
