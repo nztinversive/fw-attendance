@@ -13,13 +13,13 @@
 #    SERVER_URL   Gatekeeper server (default: https://fw-gatekeeper.onrender.com)
 # ═══════════════════════════════════════════════════════════════
 
-set -euo pipefail
+set -eo pipefail
 
 KIOSK_ID="${KIOSK_ID:-kiosk-1}"
 KIOSK_NAME="${KIOSK_NAME:-FW Kiosk}"
 KIOSK_TYPE="${KIOSK_TYPE:-entry}"
 SERVER_URL="${SERVER_URL:-https://fw-gatekeeper.onrender.com}"
-KIOSK_USER="${KIOSK_USER:-pi}"
+KIOSK_USER="${KIOSK_USER:-$(logname 2>/dev/null || echo pi)}"
 INSTALL_DIR="/opt/fw-gatekeeper"
 
 echo "╔═══════════════════════════════════════════════════╗"
@@ -44,18 +44,25 @@ apt-get upgrade -y -qq
 
 # ─── 2. Install Dependencies ───────────────────────────────────
 echo "[2/8] Installing dependencies..."
+# Detect package names (changed between Pi OS versions)
+if apt-cache show chromium >/dev/null 2>&1; then
+  CHROMIUM_PKG="chromium"
+else
+  CHROMIUM_PKG="chromium-browser"
+fi
+
 apt-get install -y -qq \
   python3 python3-pip python3-venv python3-dev \
   cmake build-essential \
   libopenblas-dev liblapack-dev \
-  libatlas-base-dev gfortran \
+  gfortran \
   libjpeg-dev libpng-dev \
   libcamera-dev libcamera-apps \
   python3-picamera2 \
   sqlite3 \
   curl wget git \
   xserver-xorg x11-xserver-utils xinit \
-  chromium-browser \
+  $CHROMIUM_PKG \
   unclutter
 
 # ─── 3. Install Kiosk Application ──────────────────────────────
