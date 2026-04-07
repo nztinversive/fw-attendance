@@ -200,20 +200,27 @@ def run(args):
                 conf = 0.0
 
                 if known_encs:
-                    if len(known_encs[0]) >= 256:
-                        sims = cosine_similarities(known_encs, candidate)
-                        if len(sims) > 0:
-                            best = int(np.argmax(sims))
-                            conf = float(sims[best])
-                            logger.info("Cosine sim: %.3f (name: %s)", conf, known_names[best])
-                            if conf >= 0.3:
-                                matched = known_names[best]
-                    else:
+                    # Pi uses dlib (128-dim) for live detection.
+                    # Server stores 512-dim MobileFaceNet encodings.
+                    # They can't be compared directly, so use dlib distance
+                    # only when dimensions match. Otherwise just show the box.
+                    enc_dim = len(known_encs[0])
+                    cand_dim = len(candidate)
+                    logger.info("Matching: known=%d-dim, candidate=%d-dim", enc_dim, cand_dim)
+
+                    if enc_dim == cand_dim:
+                        # Same dimension - can compare directly
                         dists = fr.face_distance(known_encs, candidate)
                         best = int(np.argmin(dists))
                         conf = max(0.0, 1.0 - float(dists[best]))
+                        logger.info("Match dist=%.3f conf=%.3f name=%s", float(dists[best]), conf, known_names[best])
                         if dists[best] <= config.RECOGNITION_TOLERANCE:
                             matched = known_names[best]
+                    else:
+                        # Dimension mismatch - can't compare
+                        # Mark as detected but unmatched
+                        logger.warning("Encoding dimension mismatch: known=%d vs candidate=%d. Cannot match.", enc_dim, cand_dim)
+                        conf = 0.0
 
                 current_result[0] = (face_loc, matched, conf)
 
