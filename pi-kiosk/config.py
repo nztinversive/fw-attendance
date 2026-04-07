@@ -4,7 +4,7 @@ from pathlib import Path
 
 # Server (optional if running fully offline)
 SERVER_URL = "https://fw-gatekeeper.onrender.com"
-SYNC_INTERVAL = 30  # seconds
+SYNC_INTERVAL = 120  # seconds
 
 # Kiosk identity
 KIOSK_ID = "kiosk-entry-1"
