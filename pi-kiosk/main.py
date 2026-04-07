@@ -63,13 +63,19 @@ class Camera:
 
     def capture_bgr(self):
         if self._mode == "pi":
-            rgb = self._cam.capture_array()
-            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            arr = self._cam.capture_array()
+            # picamera2 RGB888 returns BGR on some configs, RGB on others
+            # Store raw array and let callers handle conversion
+            return arr
         else:
             ret, frame = self._cam.read()
             if not ret:
                 raise RuntimeError("Failed to capture frame")
             return frame
+
+    @property
+    def is_pi(self):
+        return self._mode == "pi"
 
     def stop(self):
         if self._cam is None:
@@ -158,11 +164,21 @@ def run(args):
                 h, w = frame.shape[:2]
                 logger.debug("Processing frame %dx%d", w, h)
 
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                small = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
+                # Try as-is first (picamera2 may already be RGB)
+                small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
                 locs = fr.face_locations(small, model="hog")
 
+                # If no faces found, try swapping color channels
+                if not locs:
+                    swapped = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    small = cv2.resize(swapped, (0, 0), fx=0.5, fy=0.5)
+                    locs = fr.face_locations(small, model="hog")
+
                 detect_count[0] += 1
+                if detect_count[0] == 1:
+                    # Save first frame to disk for debugging
+                    cv2.imwrite("/opt/fw-gatekeeper/pi-kiosk/data/debug_frame.jpg", frame)
+                    logger.info("Saved debug frame to data/debug_frame.jpg")
                 if detect_count[0] % 10 == 1:
                     logger.info("Detection #%d: frame %s dtype=%s, found %d faces", detect_count[0], frame.shape, frame.dtype, len(locs))
 
