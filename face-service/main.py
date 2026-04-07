@@ -24,8 +24,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 MODEL_DIR = Path("/app/models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-FACENET_URL = "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/arcface/model/arcfaceresnet100-11.onnx"
-FACENET_PATH = MODEL_DIR / "arcface.onnx"
+FACENET_URL = "https://huggingface.co/onnxmodelzoo/arcfaceresnet100-8/resolve/main/arcfaceresnet100-8.onnx"
+FACENET_PATH = MODEL_DIR / "arcfaceresnet100-8.onnx"
 
 # Lazy globals
 _face_detector = None
