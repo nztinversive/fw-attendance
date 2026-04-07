@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
 FW Gatekeeper - Pi Kiosk Main Entry Point
-
-Runs the face recognition scanner AND the Flask web UI together.
-Camera feed runs on the main thread (smooth video).
-Face detection runs on a background thread (no blocking).
+Camera feed on main thread. Face detection on background thread.
 """
 
 import argparse
@@ -130,32 +127,44 @@ def run(args):
         while True:
             time.sleep(60)
 
-    # --- Shared state between main thread and detection thread ---
+    # Shared state
     detect_lock = threading.Lock()
-    pending_frame = [None]       # frame waiting for detection
-    detect_busy = [False]
-    # Detection result: (face_location, matched_name, confidence) or None
-    current_result = [None]
+    pending_frame = [None]
+    current_result = [None]  # (face_loc, name, confidence) or None
+    detect_count = [0]
 
     last_clocks = {}
     display_until = [0.0]
 
+    # Overlay state
+    box_loc = None
+    box_color = GOLD
+    box_label = None
+
     def detection_loop():
-        """Background thread: runs face detection + matching."""
+        """Background: detect faces + match against known workers."""
+        logger.info("Detection thread started")
         while True:
+            # Grab frame
             with detect_lock:
                 frame = pending_frame[0]
                 pending_frame[0] = None
 
             if frame is None:
-                time.sleep(0.05)
+                time.sleep(0.1)
                 continue
 
-            detect_busy[0] = True
             try:
+                h, w = frame.shape[:2]
+                logger.debug("Processing frame %dx%d", w, h)
+
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 small = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
                 locs = fr.face_locations(small, model="hog")
+
+                detect_count[0] += 1
+                if detect_count[0] % 10 == 1:
+                    logger.info("Detection #%d: found %d faces", detect_count[0], len(locs))
 
                 if not locs:
                     current_result[0] = None
@@ -180,6 +189,7 @@ def run(args):
                         if len(sims) > 0:
                             best = int(np.argmax(sims))
                             conf = float(sims[best])
+                            logger.info("Cosine sim: %.3f (name: %s)", conf, known_names[best])
                             if conf >= 0.3:
                                 matched = known_names[best]
                     else:
@@ -192,23 +202,15 @@ def run(args):
                 current_result[0] = (face_loc, matched, conf)
 
             except Exception as e:
-                logger.error("Detection error: %s", e)
+                logger.error("Detection error: %s", e, exc_info=True)
                 current_result[0] = None
-            finally:
-                detect_busy[0] = False
 
     det_thread = threading.Thread(target=detection_loop, daemon=True, name="face-detect")
     det_thread.start()
-    logger.info("Detection thread started")
-
-    # Overlay state (persists between frames)
-    box_loc = None
-    box_color = GOLD
-    box_label = None
 
     web_app.update_status(state="IDLE", message="Step toward camera",
                           known_workers=recognizer.known_count, face_detected=False)
-    logger.info("Kiosk ready")
+    logger.info("Kiosk ready - main loop starting")
 
     try:
         while True:
@@ -219,29 +221,30 @@ def run(args):
                 time.sleep(1)
                 continue
 
-            # 1. Push frame to MJPEG stream IMMEDIATELY (smooth video)
-            web_app.set_frame(draw_box(frame, box_loc, box_color, box_label))
-
             now = time.time()
 
-            # 2. Feed frame to detection thread if it's not busy
-            if not detect_busy[0]:
-                with detect_lock:
+            # 1. Push frame to stream (always, never blocks)
+            web_app.set_frame(draw_box(frame, box_loc, box_color, box_label))
+
+            # 2. Feed frame to detection thread
+            with detect_lock:
+                if pending_frame[0] is None:
                     pending_frame[0] = frame.copy()
 
-            # 3. During display hold, just show the result
+            # 3. Skip processing during display hold
             if now < display_until[0]:
                 time.sleep(0.05)
                 continue
 
-            # 4. Process detection result
+            # 4. Check latest detection result
             result = current_result[0]
 
             if result is None:
-                box_loc = None
-                box_label = None
-                web_app.update_status(state="IDLE", message="Step toward camera",
-                                      face_detected=False, known_workers=recognizer.known_count)
+                if box_loc is not None:
+                    box_loc = None
+                    box_label = None
+                    web_app.update_status(state="IDLE", message="Step toward camera",
+                                          face_detected=False, known_workers=recognizer.known_count)
                 time.sleep(0.05)
                 continue
 
@@ -261,7 +264,6 @@ def run(args):
             box_color = GREEN
             box_label = name
 
-            # Find worker ID
             _, known_ids, known_names = recognizer._snapshot_known_faces()
             worker_id = None
             if name in known_names:
@@ -271,7 +273,6 @@ def run(args):
             if worker_id is None:
                 continue
 
-            # Cooldown check
             last = last_clocks.get(worker_id)
             if last and datetime.now() - last < timedelta(minutes=config.CLOCK_DEBOUNCE_MINUTES):
                 web_app.update_status(state="ALREADY_CLOCKED",
@@ -282,7 +283,6 @@ def run(args):
                 display_until[0] = now + config.DISPLAY_TIME_SEC
                 continue
 
-            # Clock in/out
             if config.KIOSK_TYPE == "entry":
                 action = "clock_in"
             elif config.KIOSK_TYPE == "exit":
@@ -298,10 +298,7 @@ def run(args):
             last_clocks[worker_id] = datetime.now()
 
             time_str = datetime.now().strftime("%I:%M %p")
-            if action == "clock_in":
-                msg = f"Welcome, {name}! - {time_str}"
-            else:
-                msg = f"Goodbye, {name}! - {time_str}"
+            msg = f"Welcome, {name}! - {time_str}" if action == "clock_in" else f"Goodbye, {name}! - {time_str}"
 
             web_app.update_status(state="CLOCKED_IN", message=msg,
                                   worker_name=name, action=action,
