@@ -174,7 +174,7 @@ sudo KIOSK_ID=kiosk-exit-2 KIOSK_NAME="Loading Dock" KIOSK_TYPE=exit bash setup.
 
 > ⏱ Setup takes **15-25 minutes** per Pi (mostly compiling dlib). Go set up the next Pi while this one builds.
 > 
-> 💡 **Tip:** If typing long commands on the Pi is annoying, you can open the Chromium browser on the Pi desktop, go to the [README on GitHub](https://github.com/nztinversive/fw-gatekeeper), and copy-paste the commands from there.
+> 💡 **Tip:** If typing long commands on the Pi is annoying, you can open Firefox on the Pi desktop, go to the [README on GitHub](https://github.com/nztinversive/fw-gatekeeper), and copy-paste the commands from there.
 
 ## Step 4: Connect the Hardware
 
@@ -214,12 +214,8 @@ Before the kiosks can recognize anyone, enroll workers:
 # Start the face scanner + web UI
 sudo systemctl start fw-gatekeeper-kiosk
 
-# Start the HDMI display (Chromium fullscreen)
-sudo systemctl start fw-gatekeeper-display
-
-# Check both are running
+# Check it's running
 systemctl status fw-gatekeeper-kiosk
-systemctl status fw-gatekeeper-display
 
 # Watch the logs
 journalctl -u fw-gatekeeper-kiosk -f
@@ -230,9 +226,8 @@ On first start, the kiosk will:
 2. Sync worker encodings from the server
 3. Cache them locally in SQLite
 4. Start the camera and begin face scanning
-5. Chromium launches fullscreen on the HDMI monitor showing the live UI
 
-The monitor should show the FW Gatekeeper display with live camera feed, clock, and "Step toward camera" status.
+The display (Firefox in kiosk mode) launches automatically when the desktop session starts — no manual browser opening needed.
 
 Then **reboot** to verify everything auto-starts on power-on:
 
@@ -240,7 +235,10 @@ Then **reboot** to verify everything auto-starts on power-on:
 sudo reboot
 ```
 
-After reboot, the monitor should come up with the kiosk display automatically — no SSH or manual start needed.
+After reboot:
+- The kiosk service starts automatically (systemd)
+- Once the desktop loads, Firefox opens fullscreen showing the Gatekeeper UI
+- No SSH or manual start needed
 
 ## Step 7: Repeat for All 4 Kiosks
 
@@ -266,20 +264,20 @@ Flash → SSH → Connect hardware → Run setup script (with unique KIOSK_ID) �
 
 ### Monitor Display
 
-Each kiosk runs a local web UI (Flask on port 5555) displayed fullscreen via Chromium. The display shows:
+Each kiosk runs a local web UI (Flask on port 5555) displayed fullscreen via Firefox ESR in kiosk mode. The display shows:
 
 - **Live camera feed** — workers see themselves on screen
 - **Status messages** — "Step toward camera", "Blink to verify", "✅ Welcome!", "❌ Not recognized"
 - **Real-time clock** and date
-- **Today's scan log** — recent clock-in/out events
+- **Today's scan log** — recent clock-in/out events (6 max, compact layout)
 - **Manual clock** option — type a name if camera has issues
 - **Admin panel** (press 'A' key) — enrolled workers list
 
-The display auto-starts on boot. Two systemd services run:
-1. `fw-gatekeeper-kiosk` — face scanner + Flask web server
-2. `fw-gatekeeper-display` — Chromium fullscreen on HDMI
+The display auto-starts on boot via XDG autostart:
+- `fw-gatekeeper-kiosk` — systemd service (face scanner + Flask web server)
+- `fw-gatekeeper-display.sh` — autostart script (waits for Flask, launches Firefox --kiosk)
 
-**Headless mode:** If no monitor is connected, the kiosk still works — it just runs the terminal UI. The face scanner and sync run regardless of display.
+**Headless mode:** If no monitor is connected, the kiosk still works — the face scanner and sync run regardless. The autostart script simply won't open Firefox.
 
 ### Offline Mode
 - Kiosks work **without internet** after initial sync
@@ -337,19 +335,21 @@ sudo systemctl restart fw-gatekeeper-kiosk
 
 ### Monitor shows nothing / black screen
 ```bash
-# Check if the display service is running
-systemctl status fw-gatekeeper-display
-
 # Check if the kiosk web server is up
 curl http://localhost:5555/health
 
-# Restart both services
-sudo systemctl restart fw-gatekeeper-kiosk
-sudo systemctl restart fw-gatekeeper-display
+# If health is OK, manually launch the display
+~/fw-gatekeeper-display.sh &
 
-# Check HDMI output
-tvservice -s          # should show connected resolution
+# Or restart the kiosk service and reboot
+sudo systemctl restart fw-gatekeeper-kiosk
+sudo reboot
 ```
+
+If Firefox doesn't open after reboot:
+- Check the autostart file exists: `ls ~/.config/autostart/fw-gatekeeper-display.desktop`
+- Check the launcher script exists: `ls ~/fw-gatekeeper-display.sh`
+- Run it manually to see errors: `~/fw-gatekeeper-display.sh`
 
 If monitor doesn't wake up:
 - Check HDMI cable connection
