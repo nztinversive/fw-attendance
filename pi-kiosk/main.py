@@ -170,6 +170,10 @@ def run(args):
 
     last_clocks: dict[int, datetime] = {}
     display_until = 0.0
+    frame_count = 0
+    last_face_location = None
+    last_box_color = WAITING_BOX_COLOR
+    last_label = None
 
     web_app.update_status(
         state="IDLE",
@@ -190,11 +194,22 @@ def run(args):
                 continue
 
             now = time.time()
+            frame_count += 1
+
+            # Always push frame to stream immediately (keeps video smooth)
+            if last_face_location:
+                web_app.set_frame(annotate_face_frame(frame, last_face_location, last_box_color, last_label))
+            else:
+                web_app.set_frame(frame.copy())
 
             # Skip recognition during display hold
             if now < display_until:
-                web_app.set_frame(frame.copy())
                 time.sleep(0.1)
+                continue
+
+            # Only run detection every 3rd frame to keep feed smooth on Pi
+            if frame_count % 3 != 0:
+                time.sleep(0.05)
                 continue
 
             # Detect face and try to match (no liveness required)
@@ -204,7 +219,8 @@ def run(args):
             face_locations = fr.face_locations(small_rgb, model="hog")
 
             if not face_locations:
-                web_app.set_frame(frame.copy())
+                last_face_location = None
+                last_label = None
                 web_app.update_status(
                     state="IDLE",
                     message="Step toward camera",
@@ -222,11 +238,13 @@ def run(args):
             # Scale face location back to full resolution
             top, right, bottom, left = face_locations[0]
             face_location = (top * 2, right * 2, bottom * 2, left * 2)
+            last_face_location = face_location
 
             # Get encoding for detected face
             face_encodings = fr.face_encodings(small_rgb, face_locations)
             if not face_encodings:
-                web_app.set_frame(annotate_face_frame(frame, face_location, WAITING_BOX_COLOR))
+                last_box_color = WAITING_BOX_COLOR
+                last_label = None
                 time.sleep(0.3)
                 continue
 
@@ -259,7 +277,8 @@ def run(args):
                         name = names_list[best_idx]
 
             if name is None:
-                web_app.set_frame(annotate_face_frame(frame, face_location, UNRECOGNIZED_BOX_COLOR))
+                last_box_color = UNRECOGNIZED_BOX_COLOR
+                last_label = None
                 web_app.update_status(
                     state="NOT_RECOGNIZED",
                     message="❌ Face not recognized",
@@ -276,12 +295,8 @@ def run(args):
 
             # Face matched — determine action and log
             # Get worker ID from recognizer
-            annotated_frame = annotate_face_frame(
-                frame,
-                face_location,
-                MATCHED_BOX_COLOR,
-                worker_name=name,
-            )
+            last_box_color = MATCHED_BOX_COLOR
+            last_label = name
 
             worker_id = None
             if name in names_list:
@@ -289,13 +304,11 @@ def run(args):
                 worker_id = ids[idx]
 
             if worker_id is None:
-                web_app.set_frame(annotated_frame)
                 continue
 
             # Check cooldown
             last = last_clocks.get(worker_id)
             if last and datetime.now() - last < timedelta(minutes=config.CLOCK_DEBOUNCE_MINUTES):
-                web_app.set_frame(annotated_frame)
                 web_app.update_status(
                     state="ALREADY_CLOCKED",
                     message=f"✅ Already scanned, {name}!",
@@ -336,7 +349,6 @@ def run(args):
             else:
                 message = f"👋 Goodbye, {name}! — {time_str}"
 
-            web_app.set_frame(annotated_frame)
             web_app.update_status(
                 state="CLOCKED_IN",
                 message=message,
