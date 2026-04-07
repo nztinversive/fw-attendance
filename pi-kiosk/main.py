@@ -39,7 +39,7 @@ class Camera:
             try:
                 from picamera2 import Picamera2
                 self._cam = Picamera2()
-                cam_config = self._cam.create_still_configuration(
+                cam_config = self._cam.create_video_configuration(
                     main={"size": (config.CAMERA_WIDTH, config.CAMERA_HEIGHT), "format": "RGB888"}
                 )
                 self._cam.configure(cam_config)
@@ -164,7 +164,7 @@ def run(args):
 
                 detect_count[0] += 1
                 if detect_count[0] % 10 == 1:
-                    logger.info("Detection #%d: found %d faces", detect_count[0], len(locs))
+                    logger.info("Detection #%d: frame %s dtype=%s, found %d faces", detect_count[0], frame.shape, frame.dtype, len(locs))
 
                 if not locs:
                     current_result[0] = None
