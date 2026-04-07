@@ -165,7 +165,7 @@ def get_embedding(img: np.ndarray) -> Optional[list[float]]:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": "2.1-center-crop", "model_path": str(FACENET_PATH), "model_exists": FACENET_PATH.exists()}
 
 
 @app.post("/encode", response_model=EncodeResponse)
@@ -174,17 +174,22 @@ def encode(req: EncodeRequest):
         raise HTTPException(400, "No photos provided")
 
     embeddings = []
-    for photo in req.photos:
+    errors = []
+    for i, photo in enumerate(req.photos):
         try:
             img = decode_image(photo)
             emb = get_embedding(img)
             if emb is not None:
                 embeddings.append(emb)
-        except Exception:
+            else:
+                errors.append(f"photo {i}: face detected but embedding failed")
+        except Exception as e:
+            errors.append(f"photo {i}: {type(e).__name__}: {e}")
             continue
 
     if not embeddings:
-        raise HTTPException(422, "No faces detected in any photo")
+        detail = f"No faces detected in any photo. Errors: {errors}" if errors else "No faces detected in any photo"
+        raise HTTPException(422, detail)
 
     avg = np.mean(embeddings, axis=0).tolist()
     # Normalize the average
