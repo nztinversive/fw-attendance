@@ -197,15 +197,13 @@ def run(args):
                 time.sleep(0.1)
                 continue
 
-            # Run face recognition with liveness
-            name, confidence, liveness_confirmed = recognizer.recognize_with_liveness(frame)
+            # Detect face and try to match (no liveness required)
+            import face_recognition as fr
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            small_rgb = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
+            face_locations = fr.face_locations(small_rgb, model="hog")
 
-            # Update face detection status
-            face_detected = recognizer.last_face_detected
-            ear = recognizer.current_ear
-            face_location = recognizer.last_face_location
-
-            if not face_detected:
+            if not face_locations:
                 web_app.set_frame(frame.copy())
                 web_app.update_status(
                     state="IDLE",
@@ -221,21 +219,44 @@ def run(args):
                 time.sleep(0.3)
                 continue
 
-            if not liveness_confirmed:
+            # Scale face location back to full resolution
+            top, right, bottom, left = face_locations[0]
+            face_location = (top * 2, right * 2, bottom * 2, left * 2)
+
+            # Get encoding for detected face
+            face_encodings = fr.face_encodings(small_rgb, face_locations)
+            if not face_encodings:
                 web_app.set_frame(annotate_face_frame(frame, face_location, WAITING_BOX_COLOR))
-                web_app.update_status(
-                    state="WAITING_FOR_BLINK",
-                    message="Blink to verify",
-                    worker_name=None,
-                    action=None,
-                    confidence=0.0,
-                    liveness_confirmed=False,
-                    ear=ear,
-                    face_detected=True,
-                    known_workers=recognizer.known_count,
-                )
-                time.sleep(0.05)
+                time.sleep(0.3)
                 continue
+
+            candidate = face_encodings[0]
+
+            # Match against known workers
+            encodings, ids, names_list = recognizer._snapshot_known_faces()
+            name = None
+            confidence = 0.0
+
+            if encodings:
+                # Detect encoding dimension
+                first_enc = encodings[0]
+                if len(first_enc) >= 256:
+                    # ArcFace/MobileFaceNet — cosine similarity
+                    from recognition import cosine_similarities
+                    sims = cosine_similarities(encodings, candidate)
+                    if len(sims) > 0:
+                        best_idx = int(np.argmax(sims))
+                        confidence = float(sims[best_idx])
+                        if confidence >= 0.3:  # relaxed threshold for testing
+                            name = names_list[best_idx]
+                else:
+                    # Legacy dlib — euclidean distance
+                    distances = fr.face_distance(encodings, candidate)
+                    best_idx = int(np.argmin(distances))
+                    best_dist = float(distances[best_idx])
+                    confidence = max(0.0, 1.0 - best_dist)
+                    if best_dist <= config.RECOGNITION_TOLERANCE:
+                        name = names_list[best_idx]
 
             if name is None:
                 web_app.set_frame(annotate_face_frame(frame, face_location, UNRECOGNIZED_BOX_COLOR))
@@ -245,13 +266,12 @@ def run(args):
                     worker_name=None,
                     action=None,
                     confidence=confidence,
-                    liveness_confirmed=True,
-                    ear=ear,
+                    liveness_confirmed=False,
+                    ear=0.0,
                     face_detected=True,
                     known_workers=recognizer.known_count,
                 )
                 display_until = now + config.DISPLAY_TIME_SEC
-                recognizer.reset_liveness()
                 continue
 
             # Face matched — determine action and log
@@ -264,10 +284,9 @@ def run(args):
             )
 
             worker_id = None
-            with recognizer._lock:
-                if name in recognizer._names:
-                    idx = recognizer._names.index(name)
-                    worker_id = recognizer._ids[idx]
+            if name in names_list:
+                idx = names_list.index(name)
+                worker_id = ids[idx]
 
             if worker_id is None:
                 web_app.set_frame(annotated_frame)
