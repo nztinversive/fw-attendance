@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """
-FW Gatekeeper — Pi Kiosk Main Entry Point
+FW Gatekeeper - Pi Kiosk Main Entry Point
 
 Runs the face recognition scanner AND the Flask web UI together.
-The web UI shows live camera feed, welcome/denied status, and today's log.
-Connect a monitor via HDMI and run Chromium in kiosk mode for the display.
-
-Usage:
-    python main.py [--server URL] [--kiosk-id ID] [--camera auto|pi|usb]
+Camera feed runs on the main thread (smooth video).
+Face detection runs on a background thread (no blocking).
 """
 
 import argparse
 import logging
 import os
-import sys
 import time
 import threading
 from datetime import datetime, timedelta
@@ -35,12 +31,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
-# ─── Camera ────────────────────────────────────────────────────
 
 class Camera:
-    """Camera abstraction — Pi Camera or USB webcam."""
-
-    def __init__(self, mode: str = "auto"):
+    def __init__(self, mode="auto"):
         self._cam = None
         self._mode = mode
 
@@ -71,8 +64,7 @@ class Camera:
         self._mode = "usb"
         logger.info("USB Camera initialized")
 
-    def capture_bgr(self) -> np.ndarray:
-        """Capture a frame as BGR numpy array."""
+    def capture_bgr(self):
         if self._mode == "pi":
             rgb = self._cam.capture_array()
             return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
@@ -91,46 +83,24 @@ class Camera:
             self._cam.release()
 
 
-WAITING_BOX_COLOR = (11, 134, 184)
-MATCHED_BOX_COLOR = (0, 200, 0)
-UNRECOGNIZED_BOX_COLOR = (0, 0, 220)
+GOLD = (11, 134, 184)
+GREEN = (0, 200, 0)
+RED = (0, 0, 220)
 
 
-def annotate_face_frame(
-    frame: np.ndarray,
-    face_location: tuple[int, int, int, int] | None,
-    box_color: tuple[int, int, int],
-    worker_name: str | None = None,
-) -> np.ndarray:
-    """Draw a face box and optional worker name on a copy of the frame."""
-    annotated_frame = frame.copy()
-    if face_location is None:
-        return annotated_frame
+def draw_box(frame, face_loc, color, label=None):
+    out = frame.copy()
+    if face_loc is None:
+        return out
+    top, right, bottom, left = face_loc
+    cv2.rectangle(out, (left, top), (right, bottom), color, 2)
+    if label:
+        cv2.putText(out, label, (left, max(20, top - 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+    return out
 
-    top, right, bottom, left = face_location
-    cv2.rectangle(annotated_frame, (left, top), (right, bottom), box_color, 2)
-
-    if worker_name:
-        cv2.putText(
-            annotated_frame,
-            worker_name,
-            (left, max(20, top - 10)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 255, 255),
-            1,
-            cv2.LINE_AA,
-        )
-
-    return annotated_frame
-
-
-# ─── Main Loop ─────────────────────────────────────────────────
 
 def run(args):
-    """Main kiosk loop — face recognition + web UI."""
-
-    # Apply CLI args to config
     if args.server:
         config.SERVER_URL = args.server
     if args.kiosk_id:
@@ -141,49 +111,104 @@ def run(args):
     os.makedirs(config.MODEL_DIR, exist_ok=True)
     database.init_db()
 
-    # Start Flask web UI
     logger.info("Starting web UI on port %d...", config.KIOSK_PORT)
     web_app.start_server()
 
-    # Init face recognizer
     recognizer = FaceRecognizer()
     recognizer.load_faces()
     logger.info("Loaded %d known faces", recognizer.known_count)
 
-    # Start background sync
     sync_worker = SyncWorker(recognizer=recognizer)
     sync_worker.start()
 
-    # Init camera
     camera = Camera(mode=args.camera)
     try:
         camera.start()
     except RuntimeError as e:
         logger.error("Camera error: %s", e)
-        web_app.update_status(
-            state="ERROR",
-            message=f"Camera error: {e}",
-            face_detected=False,
-        )
-        # Keep web UI running even without camera
+        web_app.update_status(state="ERROR", message=f"Camera error: {e}", face_detected=False)
         while True:
             time.sleep(60)
 
-    last_clocks: dict[int, datetime] = {}
-    display_until = 0.0
-    frame_count = 0
-    last_face_location = None
-    last_box_color = WAITING_BOX_COLOR
-    last_label = None
+    # --- Shared state between main thread and detection thread ---
+    detect_lock = threading.Lock()
+    pending_frame = [None]       # frame waiting for detection
+    detect_busy = [False]
+    # Detection result: (face_location, matched_name, confidence) or None
+    current_result = [None]
 
-    web_app.update_status(
-        state="IDLE",
-        message="Step toward camera",
-        known_workers=recognizer.known_count,
-        face_detected=False,
-    )
+    last_clocks = {}
+    display_until = [0.0]
 
-    logger.info("Kiosk ready — scanning for faces")
+    def detection_loop():
+        """Background thread: runs face detection + matching."""
+        while True:
+            with detect_lock:
+                frame = pending_frame[0]
+                pending_frame[0] = None
+
+            if frame is None:
+                time.sleep(0.05)
+                continue
+
+            detect_busy[0] = True
+            try:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                small = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
+                locs = fr.face_locations(small, model="hog")
+
+                if not locs:
+                    current_result[0] = None
+                    continue
+
+                top, right, bottom, left = locs[0]
+                face_loc = (top * 2, right * 2, bottom * 2, left * 2)
+
+                encs = fr.face_encodings(small, locs)
+                if not encs:
+                    current_result[0] = (face_loc, None, 0.0)
+                    continue
+
+                candidate = encs[0]
+                known_encs, known_ids, known_names = recognizer._snapshot_known_faces()
+                matched = None
+                conf = 0.0
+
+                if known_encs:
+                    if len(known_encs[0]) >= 256:
+                        sims = cosine_similarities(known_encs, candidate)
+                        if len(sims) > 0:
+                            best = int(np.argmax(sims))
+                            conf = float(sims[best])
+                            if conf >= 0.3:
+                                matched = known_names[best]
+                    else:
+                        dists = fr.face_distance(known_encs, candidate)
+                        best = int(np.argmin(dists))
+                        conf = max(0.0, 1.0 - float(dists[best]))
+                        if dists[best] <= config.RECOGNITION_TOLERANCE:
+                            matched = known_names[best]
+
+                current_result[0] = (face_loc, matched, conf)
+
+            except Exception as e:
+                logger.error("Detection error: %s", e)
+                current_result[0] = None
+            finally:
+                detect_busy[0] = False
+
+    det_thread = threading.Thread(target=detection_loop, daemon=True, name="face-detect")
+    det_thread.start()
+    logger.info("Detection thread started")
+
+    # Overlay state (persists between frames)
+    box_loc = None
+    box_color = GOLD
+    box_label = None
+
+    web_app.update_status(state="IDLE", message="Step toward camera",
+                          known_workers=recognizer.known_count, face_detected=False)
+    logger.info("Kiosk ready")
 
     try:
         while True:
@@ -194,136 +219,70 @@ def run(args):
                 time.sleep(1)
                 continue
 
+            # 1. Push frame to MJPEG stream IMMEDIATELY (smooth video)
+            web_app.set_frame(draw_box(frame, box_loc, box_color, box_label))
+
             now = time.time()
-            frame_count += 1
 
-            # Always push frame to stream immediately (keeps video smooth)
-            if last_face_location:
-                web_app.set_frame(annotate_face_frame(frame, last_face_location, last_box_color, last_label))
-            else:
-                web_app.set_frame(frame.copy())
+            # 2. Feed frame to detection thread if it's not busy
+            if not detect_busy[0]:
+                with detect_lock:
+                    pending_frame[0] = frame.copy()
 
-            # Skip recognition during display hold
-            if now < display_until:
-                time.sleep(0.1)
-                continue
-
-            # Only run detection every 3rd frame to keep feed smooth on Pi
-            if frame_count % 3 != 0:
+            # 3. During display hold, just show the result
+            if now < display_until[0]:
                 time.sleep(0.05)
                 continue
 
-            # Detect face and try to match (no liveness required)
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            small_rgb = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
-            face_locations = fr.face_locations(small_rgb, model="hog")
+            # 4. Process detection result
+            result = current_result[0]
 
-            if not face_locations:
-                last_face_location = None
-                last_label = None
-                web_app.update_status(
-                    state="IDLE",
-                    message="Step toward camera",
-                    worker_name=None,
-                    action=None,
-                    confidence=0.0,
-                    liveness_confirmed=False,
-                    ear=0.0,
-                    face_detected=False,
-                    known_workers=recognizer.known_count,
-                )
-                time.sleep(0.3)
+            if result is None:
+                box_loc = None
+                box_label = None
+                web_app.update_status(state="IDLE", message="Step toward camera",
+                                      face_detected=False, known_workers=recognizer.known_count)
+                time.sleep(0.05)
                 continue
 
-            # Scale face location back to full resolution
-            top, right, bottom, left = face_locations[0]
-            face_location = (top * 2, right * 2, bottom * 2, left * 2)
-            last_face_location = face_location
-
-            # Get encoding for detected face
-            face_encodings = fr.face_encodings(small_rgb, face_locations)
-            if not face_encodings:
-                last_box_color = WAITING_BOX_COLOR
-                last_label = None
-                time.sleep(0.3)
-                continue
-
-            candidate = face_encodings[0]
-
-            # Match against known workers
-            encodings, ids, names_list = recognizer._snapshot_known_faces()
-            name = None
-            confidence = 0.0
-
-            if encodings:
-                # Detect encoding dimension
-                first_enc = encodings[0]
-                if len(first_enc) >= 256:
-                    # ArcFace/MobileFaceNet — cosine similarity
-                    sims = cosine_similarities(encodings, candidate)
-                    if len(sims) > 0:
-                        best_idx = int(np.argmax(sims))
-                        confidence = float(sims[best_idx])
-                        if confidence >= 0.3:  # relaxed threshold for testing
-                            name = names_list[best_idx]
-                else:
-                    # Legacy dlib — euclidean distance
-                    distances = fr.face_distance(encodings, candidate)
-                    best_idx = int(np.argmin(distances))
-                    best_dist = float(distances[best_idx])
-                    confidence = max(0.0, 1.0 - best_dist)
-                    if best_dist <= config.RECOGNITION_TOLERANCE:
-                        name = names_list[best_idx]
+            face_loc, name, confidence = result
+            box_loc = face_loc
 
             if name is None:
-                last_box_color = UNRECOGNIZED_BOX_COLOR
-                last_label = None
-                web_app.update_status(
-                    state="NOT_RECOGNIZED",
-                    message="❌ Face not recognized",
-                    worker_name=None,
-                    action=None,
-                    confidence=confidence,
-                    liveness_confirmed=False,
-                    ear=0.0,
-                    face_detected=True,
-                    known_workers=recognizer.known_count,
-                )
-                display_until = now + config.DISPLAY_TIME_SEC
+                box_color = RED
+                box_label = None
+                web_app.update_status(state="NOT_RECOGNIZED", message="Face not recognized",
+                                      face_detected=True, confidence=confidence,
+                                      known_workers=recognizer.known_count)
+                display_until[0] = now + config.DISPLAY_TIME_SEC
                 continue
 
-            # Face matched — determine action and log
-            # Get worker ID from recognizer
-            last_box_color = MATCHED_BOX_COLOR
-            last_label = name
+            # Matched!
+            box_color = GREEN
+            box_label = name
 
+            # Find worker ID
+            _, known_ids, known_names = recognizer._snapshot_known_faces()
             worker_id = None
-            if name in names_list:
-                idx = names_list.index(name)
-                worker_id = ids[idx]
+            if name in known_names:
+                idx = known_names.index(name)
+                worker_id = known_ids[idx]
 
             if worker_id is None:
                 continue
 
-            # Check cooldown
+            # Cooldown check
             last = last_clocks.get(worker_id)
             if last and datetime.now() - last < timedelta(minutes=config.CLOCK_DEBOUNCE_MINUTES):
-                web_app.update_status(
-                    state="ALREADY_CLOCKED",
-                    message=f"✅ Already scanned, {name}!",
-                    worker_name=name,
-                    action=None,
-                    confidence=confidence,
-                    liveness_confirmed=True,
-                    ear=ear,
-                    face_detected=True,
-                    known_workers=recognizer.known_count,
-                )
-                display_until = now + config.DISPLAY_TIME_SEC
-                recognizer.reset_liveness()
+                web_app.update_status(state="ALREADY_CLOCKED",
+                                      message=f"Already scanned, {name}!",
+                                      worker_name=name, face_detected=True,
+                                      confidence=confidence,
+                                      known_workers=recognizer.known_count)
+                display_until[0] = now + config.DISPLAY_TIME_SEC
                 continue
 
-            # Determine clock action
+            # Clock in/out
             if config.KIOSK_TYPE == "entry":
                 action = "clock_in"
             elif config.KIOSK_TYPE == "exit":
@@ -332,37 +291,24 @@ def run(args):
                 last_action = database.get_last_action(worker_id)
                 action = "clock_out" if last_action == "clock_in" else "clock_in"
 
-            # Log attendance
             database.log_attendance(
-                worker_id=worker_id,
-                worker_name=name,
-                action=action,
-                liveness_confirmed=True,
-                confidence=confidence,
+                worker_id=worker_id, worker_name=name,
+                action=action, liveness_confirmed=False, confidence=confidence,
             )
             last_clocks[worker_id] = datetime.now()
 
             time_str = datetime.now().strftime("%I:%M %p")
             if action == "clock_in":
-                message = f"✅ Welcome, {name}! — {time_str}"
+                msg = f"Welcome, {name}! - {time_str}"
             else:
-                message = f"👋 Goodbye, {name}! — {time_str}"
+                msg = f"Goodbye, {name}! - {time_str}"
 
-            web_app.update_status(
-                state="CLOCKED_IN",
-                message=message,
-                worker_name=name,
-                action=action,
-                confidence=confidence,
-                liveness_confirmed=True,
-                ear=ear,
-                face_detected=True,
-                known_workers=recognizer.known_count,
-            )
-
+            web_app.update_status(state="CLOCKED_IN", message=msg,
+                                  worker_name=name, action=action,
+                                  confidence=confidence, face_detected=True,
+                                  known_workers=recognizer.known_count)
             logger.info("%s: %s (confidence: %.2f)", action.replace("_", " ").title(), name, confidence)
-            display_until = now + config.DISPLAY_TIME_SEC
-            recognizer.reset_liveness()
+            display_until[0] = now + config.DISPLAY_TIME_SEC
 
     except KeyboardInterrupt:
         logger.info("Shutting down...")
@@ -373,9 +319,7 @@ def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="FW Gatekeeper Pi Kiosk")
-    parser.add_argument("--server", default=None, help="Gatekeeper server URL")
-    parser.add_argument("--kiosk-id", default=None, help="Unique kiosk identifier")
-    parser.add_argument("--camera", choices=["auto", "pi", "usb"], default="auto", help="Camera type")
-
-    args = parser.parse_args()
-    run(args)
+    parser.add_argument("--server", default=None)
+    parser.add_argument("--kiosk-id", default=None)
+    parser.add_argument("--camera", choices=["auto", "pi", "usb"], default="auto")
+    run(parser.parse_args())
