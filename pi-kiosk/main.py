@@ -20,10 +20,11 @@ from datetime import datetime, timedelta
 
 import cv2
 import numpy as np
+import face_recognition as fr
 
 import config
 import database
-from recognition import FaceRecognizer
+from recognition import FaceRecognizer, cosine_similarities
 from sync import SyncWorker
 import app as web_app
 
@@ -213,7 +214,6 @@ def run(args):
                 continue
 
             # Detect face and try to match (no liveness required)
-            import face_recognition as fr
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             small_rgb = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
             face_locations = fr.face_locations(small_rgb, model="hog")
@@ -260,7 +260,6 @@ def run(args):
                 first_enc = encodings[0]
                 if len(first_enc) >= 256:
                     # ArcFace/MobileFaceNet — cosine similarity
-                    from recognition import cosine_similarities
                     sims = cosine_similarities(encodings, candidate)
                     if len(sims) > 0:
                         best_idx = int(np.argmax(sims))
