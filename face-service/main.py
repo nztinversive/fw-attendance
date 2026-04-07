@@ -27,6 +27,9 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 FACENET_URL = "https://huggingface.co/onnxmodelzoo/arcfaceresnet100-8/resolve/main/arcfaceresnet100-8.onnx"
 FACENET_PATH = MODEL_DIR / "arcfaceresnet100-8.onnx"
 
+# Log model status at import time
+print(f"Model path: {FACENET_PATH}, exists: {FACENET_PATH.exists()}")
+
 # Lazy globals
 _face_detector = None
 _session = None

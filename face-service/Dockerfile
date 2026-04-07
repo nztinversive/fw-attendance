@@ -10,6 +10,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download ArcFace model during build (249MB) so it's baked into the image
+RUN mkdir -p /app/models && \
+    apt-get update && apt-get install -y --no-install-recommends wget && \
+    wget -q "https://huggingface.co/onnxmodelzoo/arcfaceresnet100-8/resolve/main/arcfaceresnet100-8.onnx" \
+      -O /app/models/arcfaceresnet100-8.onnx && \
+    apt-get remove -y wget && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
 COPY main.py .
 
 EXPOSE 5557
