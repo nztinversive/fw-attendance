@@ -92,19 +92,40 @@ def decode_image(data_url: str) -> np.ndarray:
 
 
 def detect_and_align(img: np.ndarray) -> Optional[np.ndarray]:
-    """Detect face and return 112x112 aligned crop for ArcFace."""
+    """Detect face and return 112x112 aligned crop for ArcFace.
+    
+    Tries multiple detection strategies for robustness:
+    1. Haar cascade with relaxed params
+    2. Haar cascade with very relaxed params
+    3. Assume center crop if image looks like a selfie (fallback)
+    """
     detector = get_face_detector()
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
-
+    
+    # Try 1: Standard detection
+    faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30))
+    
+    # Try 2: More lenient if nothing found
     if len(faces) == 0:
+        faces = detector.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=2, minSize=(20, 20))
+    
+    # Try 3: Center crop fallback (assumes face is roughly centered, like a selfie)
+    if len(faces) == 0:
+        h, w = img.shape[:2]
+        # Take center 60% of image as face region
+        margin_x = int(w * 0.2)
+        margin_y = int(h * 0.1)
+        face_crop = img[margin_y:h-margin_y, margin_x:w-margin_x]
+        if face_crop.shape[0] > 10 and face_crop.shape[1] > 10:
+            face_resized = cv2.resize(face_crop, (112, 112))
+            return face_resized
         return None
 
     # Take largest face
     x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
 
     # Add padding
-    pad = int(max(w, h) * 0.2)
+    pad = int(max(w, h) * 0.25)
     x1 = max(0, x - pad)
     y1 = max(0, y - pad)
     x2 = min(img.shape[1], x + w + pad)

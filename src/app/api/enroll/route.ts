@@ -57,9 +57,12 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({ photos }),
         signal: AbortSignal.timeout(60000), // 60s — face service cold start + encoding
       });
+      const encodeBody = await encodeRes.json();
       if (encodeRes.ok) {
-        const encodeData = await encodeRes.json();
-        faceEncoding = encodeData.encoding;
+        faceEncoding = encodeBody.encoding;
+        console.log('Face encoding success:', faceEncoding?.length, 'dimensions');
+      } else {
+        console.error('Face encoding service returned', encodeRes.status, encodeBody);
       }
     } catch (encodeErr) {
       console.error('Face encoding failed:', encodeErr);
