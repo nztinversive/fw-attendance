@@ -61,8 +61,8 @@ export async function POST(req: NextRequest) {
         const encodeData = await encodeRes.json();
         faceEncoding = encodeData.encoding;
       }
-    } catch {
-      // Encoding service not available
+    } catch (encodeErr) {
+      console.error('Face encoding failed:', encodeErr);
     }
 
     const result = await convex.mutation(api.workers.create, {
