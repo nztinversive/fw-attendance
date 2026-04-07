@@ -90,6 +90,40 @@ class Camera:
             self._cam.release()
 
 
+WAITING_BOX_COLOR = (11, 134, 184)
+MATCHED_BOX_COLOR = (0, 200, 0)
+UNRECOGNIZED_BOX_COLOR = (0, 0, 220)
+
+
+def annotate_face_frame(
+    frame: np.ndarray,
+    face_location: tuple[int, int, int, int] | None,
+    box_color: tuple[int, int, int],
+    worker_name: str | None = None,
+) -> np.ndarray:
+    """Draw a face box and optional worker name on a copy of the frame."""
+    annotated_frame = frame.copy()
+    if face_location is None:
+        return annotated_frame
+
+    top, right, bottom, left = face_location
+    cv2.rectangle(annotated_frame, (left, top), (right, bottom), box_color, 2)
+
+    if worker_name:
+        cv2.putText(
+            annotated_frame,
+            worker_name,
+            (left, max(20, top - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+    return annotated_frame
+
+
 # ─── Main Loop ─────────────────────────────────────────────────
 
 def run(args):
@@ -157,11 +191,9 @@ def run(args):
 
             now = time.time()
 
-            # Always feed frame to web UI for MJPEG stream
-            web_app.set_frame(frame)
-
             # Skip recognition during display hold
             if now < display_until:
+                web_app.set_frame(frame.copy())
                 time.sleep(0.1)
                 continue
 
@@ -171,8 +203,10 @@ def run(args):
             # Update face detection status
             face_detected = recognizer.last_face_detected
             ear = recognizer.current_ear
+            face_location = recognizer.last_face_location
 
             if not face_detected:
+                web_app.set_frame(frame.copy())
                 web_app.update_status(
                     state="IDLE",
                     message="Step toward camera",
@@ -188,6 +222,7 @@ def run(args):
                 continue
 
             if not liveness_confirmed:
+                web_app.set_frame(annotate_face_frame(frame, face_location, WAITING_BOX_COLOR))
                 web_app.update_status(
                     state="WAITING_FOR_BLINK",
                     message="Blink to verify",
@@ -203,6 +238,7 @@ def run(args):
                 continue
 
             if name is None:
+                web_app.set_frame(annotate_face_frame(frame, face_location, UNRECOGNIZED_BOX_COLOR))
                 web_app.update_status(
                     state="NOT_RECOGNIZED",
                     message="❌ Face not recognized",
@@ -220,6 +256,13 @@ def run(args):
 
             # Face matched — determine action and log
             # Get worker ID from recognizer
+            annotated_frame = annotate_face_frame(
+                frame,
+                face_location,
+                MATCHED_BOX_COLOR,
+                worker_name=name,
+            )
+
             worker_id = None
             with recognizer._lock:
                 if name in recognizer._names:
@@ -227,11 +270,13 @@ def run(args):
                     worker_id = recognizer._ids[idx]
 
             if worker_id is None:
+                web_app.set_frame(annotated_frame)
                 continue
 
             # Check cooldown
             last = last_clocks.get(worker_id)
             if last and datetime.now() - last < timedelta(minutes=config.CLOCK_DEBOUNCE_MINUTES):
+                web_app.set_frame(annotated_frame)
                 web_app.update_status(
                     state="ALREADY_CLOCKED",
                     message=f"✅ Already scanned, {name}!",
@@ -272,6 +317,7 @@ def run(args):
             else:
                 message = f"👋 Goodbye, {name}! — {time_str}"
 
+            web_app.set_frame(annotated_frame)
             web_app.update_status(
                 state="CLOCKED_IN",
                 message=message,
