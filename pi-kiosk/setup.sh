@@ -142,28 +142,44 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# Firefox kiosk display (fullscreen browser on HDMI monitor)
-cat > /etc/systemd/system/fw-gatekeeper-display.service << EOF
-[Unit]
-Description=FW Gatekeeper Display ($KIOSK_NAME)
-After=fw-gatekeeper-kiosk.service
-Requires=fw-gatekeeper-kiosk.service
+# Firefox kiosk display — autostart on desktop login (works with Wayland/labwc)
+# Systemd services can't access the Wayland display session, so we use XDG autostart instead
+KIOSK_HOME=$(eval echo ~$KIOSK_USER)
+mkdir -p "$KIOSK_HOME/.config/autostart"
 
-[Service]
-Type=simple
-User=$KIOSK_USER
-Environment=DISPLAY=:0
-Environment=MOZ_ENABLE_WAYLAND=1
-ExecStartPre=/bin/bash -c 'for i in \$(seq 1 30); do curl -sf http://localhost:5555/health >/dev/null 2>&1 && exit 0; sleep 2; done; exit 1'
-ExecStart=/usr/bin/firefox-esr --kiosk http://localhost:5555
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
+# Create launcher script that waits for Flask then opens Firefox
+cat > "$KIOSK_HOME/fw-gatekeeper-display.sh" << 'DISPLAYEOF'
+#!/bin/bash
+# FW Gatekeeper — wait for kiosk web server then launch Firefox fullscreen
+for i in $(seq 1 60); do
+  curl -sf http://localhost:5555/health >/dev/null 2>&1 && break
+  sleep 2
+done
 
-[Install]
-WantedBy=multi-user.target
+# Kill any existing Firefox kiosk instances
+pkill -f 'firefox.*kiosk.*localhost:5555' 2>/dev/null || true
+sleep 1
+
+exec firefox-esr --kiosk http://localhost:5555
+DISPLAYEOF
+chmod +x "$KIOSK_HOME/fw-gatekeeper-display.sh"
+chown $KIOSK_USER:$KIOSK_USER "$KIOSK_HOME/fw-gatekeeper-display.sh"
+
+# XDG autostart entry — runs when the user's desktop session starts
+cat > "$KIOSK_HOME/.config/autostart/fw-gatekeeper-display.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=FW Gatekeeper Display
+Exec=$KIOSK_HOME/fw-gatekeeper-display.sh
+X-GNOME-Autostart-enabled=true
+Hidden=false
+NoDisplay=false
 EOF
+chown -R $KIOSK_USER:$KIOSK_USER "$KIOSK_HOME/.config/autostart"
+
+# Remove old systemd display service if it exists
+systemctl disable fw-gatekeeper-display.service 2>/dev/null || true
+rm -f /etc/systemd/system/fw-gatekeeper-display.service
 
 # Watchdog timer — restart kiosk if it dies
 cat > /etc/systemd/system/fw-gatekeeper-watchdog.service << 'EOF'
