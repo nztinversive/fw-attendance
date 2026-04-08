@@ -169,6 +169,16 @@
             text-overflow: ellipsis;
         }
 
+        .admin-controls {
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .admin-controls.active {
+            display: flex;
+        }
+
         .status-meta {
             color: var(--muted);
             font-size: 0.76rem;
@@ -430,15 +440,17 @@
         </section>
 
         <aside class="side">
-            <h2>Manual Clock</h2>
-            <div class="manual">
-                <input id="manualName" type="text" placeholder="Worker name">
-                <button id="manualBtn">Submit</button>
-            </div>
-            <div id="manualResult" class="manual-result"></div>
+            <div id="adminControls" class="admin-controls">
+                <h2>Manual Clock</h2>
+                <div class="manual">
+                    <input id="manualName" type="text" placeholder="Worker name">
+                    <button id="manualBtn">Submit</button>
+                </div>
+                <div id="manualResult" class="manual-result"></div>
 
-            <button id="adminToggle" class="admin-toggle">Admin Mode (A)</button>
-            <div id="adminPanel" class="admin-panel"></div>
+                <button id="adminToggle" class="admin-toggle">Admin Mode (A)</button>
+                <div id="adminPanel" class="admin-panel"></div>
+            </div>
 
             <h2>Today Log</h2>
             <div id="logList" class="log-list"></div>
@@ -452,6 +464,7 @@
 
     <script>
         const statusText = document.getElementById("statusText");
+        const statusCard = document.querySelector(".status-card");
         const stateValue = document.getElementById("stateValue");
         const earValue = document.getElementById("earValue");
         const knownValue = document.getElementById("knownValue");
@@ -460,6 +473,7 @@
         const manualBtn = document.getElementById("manualBtn");
         const manualName = document.getElementById("manualName");
         const manualResult = document.getElementById("manualResult");
+        const adminControls = document.getElementById("adminControls");
         const adminToggle = document.getElementById("adminToggle");
         const adminPanel = document.getElementById("adminPanel");
         const lastUpdated = document.getElementById("lastUpdated");
@@ -493,6 +507,29 @@
             return "Step toward camera";
         }
 
+        function applyStatusState(state) {
+            const normalizedState = state || "IDLE";
+            let borderColor = "#b8860b";
+            let textColor = "";
+
+            if (normalizedState === "CLOCKED_IN" || normalizedState === "ALREADY_CLOCKED") {
+                borderColor = "#2fa36b";
+                textColor = "#2fa36b";
+            } else if (normalizedState === "NOT_RECOGNIZED") {
+                borderColor = "#bf4934";
+                textColor = "#bf4934";
+            }
+
+            statusCard.style.borderLeftColor = borderColor;
+            statusText.style.color = textColor;
+        }
+
+        function setAdminVisible(visible) {
+            adminVisible = visible;
+            adminControls.classList.toggle("active", adminVisible);
+            adminPanel.classList.toggle("active", adminVisible);
+        }
+
         async function fetchStatus() {
             try {
                 const response = await fetch("/status", { cache: "no-store" });
@@ -504,6 +541,7 @@
                     data.action
                 );
                 statusText.textContent = msg;
+                applyStatusState(data.state);
                 stateValue.textContent = `State: ${data.state || "IDLE"}`;
                 earValue.textContent = `EAR: ${Number(data.ear || 0).toFixed(2)}`;
                 knownValue.textContent = `Workers: ${data.known_workers || 0}`;
@@ -515,6 +553,7 @@
                 }
             } catch (error) {
                 statusText.textContent = "Status unavailable";
+                applyStatusState("NOT_RECOGNIZED");
             }
         }
 
@@ -593,14 +632,12 @@
         }
 
         adminToggle.addEventListener("click", () => {
-            adminVisible = !adminVisible;
-            adminPanel.classList.toggle("active", adminVisible);
+            setAdminVisible(!adminVisible);
         });
 
         document.addEventListener("keydown", (event) => {
             if (event.key.toLowerCase() === "a") {
-                adminVisible = !adminVisible;
-                adminPanel.classList.toggle("active", adminVisible);
+                setAdminVisible(!adminVisible);
             }
             if (event.key === "Enter" && document.activeElement === manualName) {
                 submitManualClock();
