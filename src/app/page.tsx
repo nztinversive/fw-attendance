@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import StatsBar from '@/components/StatsBar';
 import WorkerCard from '@/components/WorkerCard';
 import { DashboardSkeleton } from '@/components/Skeleton';
+import { getLocalDateString } from '@/lib/date';
 
 interface WorkerWithStatus {
   id: string;
@@ -24,10 +25,11 @@ export default function Dashboard() {
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
+      const today = getLocalDateString();
       const [statsRes, workersRes, attendanceRes] = await Promise.all([
-        fetch('/api/stats'),
+        fetch(`/api/stats?date=${today}`),
         fetch('/api/workers'),
-        fetch(`/api/attendance?date=${new Date().toISOString().split('T')[0]}`),
+        fetch(`/api/attendance?date=${today}`),
       ]);
 
       const statsData = await statsRes.json();

@@ -35,23 +35,36 @@ logger = logging.getLogger("main")
 REC_MODEL_URL = "https://huggingface.co/immich-app/buffalo_s/resolve/main/recognition/model.onnx"
 REC_MODEL_PATH = Path("data/models/mobilefacenet.onnx")
 _rec_session = None
+_rec_session_error = None
 
 
 def ensure_rec_model():
     REC_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not REC_MODEL_PATH.exists():
-        logger.info("Downloading MobileFaceNet model (13MB)...")
-        urllib.request.urlretrieve(REC_MODEL_URL, str(REC_MODEL_PATH))
-        logger.info("Downloaded MobileFaceNet to %s", REC_MODEL_PATH)
+        try:
+            logger.info("Downloading MobileFaceNet model (13MB)...")
+            urllib.request.urlretrieve(REC_MODEL_URL, str(REC_MODEL_PATH))
+            logger.info("Downloaded MobileFaceNet to %s", REC_MODEL_PATH)
+        except Exception as exc:
+            logger.error("Failed to download MobileFaceNet model: %s", exc)
+            return False
+    return True
 
 
 def get_rec_session():
-    global _rec_session
+    global _rec_session, _rec_session_error
     if _rec_session is None:
         import onnxruntime as ort
-        ensure_rec_model()
-        _rec_session = ort.InferenceSession(str(REC_MODEL_PATH), providers=["CPUExecutionProvider"])
-        logger.info("MobileFaceNet ONNX session loaded")
+        if not ensure_rec_model():
+            _rec_session_error = "download_failed"
+            raise RuntimeError("Recognition model unavailable")
+        try:
+            _rec_session = ort.InferenceSession(str(REC_MODEL_PATH), providers=["CPUExecutionProvider"])
+            logger.info("MobileFaceNet ONNX session loaded")
+            _rec_session_error = None
+        except Exception as exc:
+            _rec_session_error = str(exc)
+            raise RuntimeError(f"Recognition model failed to initialize: {exc}") from exc
     return _rec_session
 
 
@@ -165,8 +178,9 @@ def run(args):
     os.makedirs(config.MODEL_DIR, exist_ok=True)
     database.init_db()
 
-    # Pre-download MobileFaceNet model
-    ensure_rec_model()
+    # Pre-download MobileFaceNet model, but continue booting if offline.
+    if not ensure_rec_model():
+        logger.warning("Recognition model unavailable at startup; kiosk will keep retrying in the background.")
 
     logger.info("Starting web UI on port %d...", config.KIOSK_PORT)
     web_app.start_server()

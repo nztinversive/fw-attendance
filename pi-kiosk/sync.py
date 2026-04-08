@@ -17,6 +17,12 @@ import database
 logger = logging.getLogger(__name__)
 
 
+def _auth_headers() -> dict[str, str]:
+    if not config.KIOSK_API_KEY:
+        return {}
+    return {"x-kiosk-key": config.KIOSK_API_KEY}
+
+
 def check_server() -> bool:
     """Check if the central server is reachable."""
     try:
@@ -78,6 +84,7 @@ def sync_attendance() -> bool:
         r = requests.post(
             f"{config.SERVER_URL}/api/attendance/bulk",
             json={"kiosk_id": config.KIOSK_ID, "logs": payload_logs},
+            headers=_auth_headers(),
             timeout=15,
         )
         if r.status_code == 200:
@@ -108,6 +115,7 @@ def sync_workers() -> bool:
         r = requests.get(
             f"{config.SERVER_URL}/api/sync",
             params={"kiosk_id": config.KIOSK_ID, "since": last_sync},
+            headers=_auth_headers(),
             timeout=15,
         )
         if r.status_code != 200:
@@ -123,6 +131,12 @@ def sync_workers() -> bool:
             encoding_data = w.get("face_encoding")
             photo_url = w.get("photo_url")
             enrolled_at = w.get("enrolled_at")
+            is_active = bool(w.get("active"))
+
+            if server_id and not is_active:
+                if database.remove_worker_by_server_id(str(server_id)):
+                    logger.info("Removed deactivated worker: %s (server_id=%s)", name or "unknown", server_id)
+                continue
 
             if not server_id or not name or encoding_data is None:
                 logger.warning("Skipping worker sync row with missing required fields: %s", w)
@@ -144,7 +158,7 @@ def sync_workers() -> bool:
             )
             logger.info("Synced worker: %s (server_id=%s)", name, server_id)
 
-        database.set_sync_state("last_worker_sync", datetime.now().isoformat())
+        database.set_sync_state("last_worker_sync", data.get("synced_at") or datetime.now().isoformat())
         logger.info("Worker sync complete: %d workers", len(workers))
         return True
 

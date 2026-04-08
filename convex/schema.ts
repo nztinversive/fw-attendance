@@ -8,6 +8,7 @@ export default defineSchema({
     photoStorageIds: v.optional(v.array(v.id("_storage"))),
     faceEncoding: v.optional(v.array(v.float64())),
     enrolledAt: v.string(),
+    updatedAt: v.optional(v.string()),
     active: v.boolean(),
   }).index("by_active", ["active"]),
 

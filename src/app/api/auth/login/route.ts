@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createAdminToken, getAdminCookieMaxAge, getAdminCookieName } from '@/lib/auth';
 
 const ADMIN_PIN = process.env.ADMIN_PIN || '1234';
 
@@ -10,15 +11,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid PIN' }, { status: 401 });
     }
 
-    // Create a simple signed token (timestamp + hash)
-    const token = Buffer.from(`${Date.now()}:${ADMIN_PIN}`).toString('base64');
+    const token = await createAdminToken();
 
     const res = NextResponse.json({ ok: true });
-    res.cookies.set('fw-auth', token, {
+    res.cookies.set(getAdminCookieName(), token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
+      maxAge: getAdminCookieMaxAge(),
       path: '/',
     });
 

@@ -47,6 +47,27 @@ def cosine_similarities(known: list[np.ndarray], candidate: np.ndarray) -> np.nd
     return known_normed @ cand_normed
 
 
+def _supported_encodings(
+    encodings: list[np.ndarray],
+    ids: list[int],
+    names: list[str],
+    candidate_dim: int,
+) -> tuple[list[np.ndarray], list[int], list[str]]:
+    filtered: list[tuple[np.ndarray, int, str]] = []
+    for encoding, worker_id, name in zip(encodings, ids, names):
+        arr = np.asarray(encoding, dtype=np.float64).reshape(-1)
+        if arr.size != candidate_dim:
+            logger.warning("Skipping worker %s during match due to encoding dimension %d", name, arr.size)
+            continue
+        filtered.append((arr, worker_id, name))
+
+    if not filtered:
+        return [], [], []
+
+    filtered_encodings, filtered_ids, filtered_names = zip(*filtered)
+    return list(filtered_encodings), list(filtered_ids), list(filtered_names)
+
+
 class FaceRecognizer:
     """Loads known workers and matches live faces against stored encodings."""
 
@@ -181,6 +202,11 @@ class FaceRecognizer:
             return None, 0.0, True
 
         candidate = candidate_encodings[0]
+        candidate_dim = int(candidate.size)
+
+        encodings, ids, names = _supported_encodings(encodings, ids, names, candidate_dim)
+        if not encodings:
+            return None, 0.0, True
 
         # Detect encoding dimension to choose matching strategy
         first_enc = encodings[0]

@@ -1,6 +1,15 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
+const SUPPORTED_ENCODING_LENGTHS = new Set([128, 512]);
+
+function isSupportedFaceEncoding(encoding?: number[]) {
+  return (
+    encoding === undefined ||
+    (SUPPORTED_ENCODING_LENGTHS.has(encoding.length) && encoding.every((value) => Number.isFinite(value)))
+  );
+}
+
 export const list = query({
   args: { includeEncodings: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
@@ -37,15 +46,24 @@ export const create = mutation({
     photoStorageIds: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args) => {
+    const name = args.name.trim();
+    if (!name) {
+      throw new Error("Worker name is required");
+    }
+    if (!isSupportedFaceEncoding(args.faceEncoding)) {
+      throw new Error("faceEncoding must contain 128 or 512 finite values");
+    }
+    const now = new Date().toISOString();
     const id = await ctx.db.insert("workers", {
-      name: args.name,
+      name,
       department: args.department || "",
       faceEncoding: args.faceEncoding,
       photoStorageIds: args.photoStorageIds,
-      enrolledAt: new Date().toISOString(),
+      enrolledAt: now,
+      updatedAt: now,
       active: true,
     });
-    return { id, name: args.name, department: args.department || "" };
+    return { id, name, department: args.department || "" };
   },
 });
 
@@ -60,10 +78,20 @@ export const update = mutation({
   handler: async (ctx, args) => {
     const { id, ...fields } = args;
     const updates: Record<string, unknown> = {};
-    if (fields.name !== undefined) updates.name = fields.name;
+    if (!isSupportedFaceEncoding(fields.faceEncoding)) {
+      throw new Error("faceEncoding must contain 128 or 512 finite values");
+    }
+    if (fields.name !== undefined) {
+      const trimmedName = fields.name.trim();
+      if (!trimmedName) {
+        throw new Error("Worker name is required");
+      }
+      updates.name = trimmedName;
+    }
     if (fields.department !== undefined) updates.department = fields.department;
     if (fields.faceEncoding !== undefined) updates.faceEncoding = fields.faceEncoding;
     if (fields.photoStorageIds !== undefined) updates.photoStorageIds = fields.photoStorageIds;
+    updates.updatedAt = new Date().toISOString();
     await ctx.db.patch(id, updates);
     return { ok: true };
   },
@@ -72,7 +100,7 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("workers") },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.id, { active: false });
+    await ctx.db.patch(args.id, { active: false, updatedAt: new Date().toISOString() });
     return { ok: true };
   },
 });
@@ -82,7 +110,7 @@ export const listForSync = query({
   handler: async (ctx, args) => {
     const all = await ctx.db.query("workers").collect();
     const since = args.since || "1970-01-01T00:00:00.000Z";
-    const filtered = all.filter((w) => w.active || w.enrolledAt > since);
+    const filtered = all.filter((w) => (w.updatedAt || w.enrolledAt) > since);
     const result = [];
     for (const w of filtered) {
       let photoUrls: string[] = [];
@@ -99,6 +127,7 @@ export const listForSync = query({
         photo_url: photoUrls[0] || null,
         face_encoding: w.faceEncoding || null,
         enrolled_at: w.enrolledAt,
+        updated_at: w.updatedAt || w.enrolledAt,
         active: w.active ? 1 : 0,
       });
     }

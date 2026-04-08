@@ -1,5 +1,6 @@
 """Configuration for FW Gatekeeper Pi kiosk."""
 
+import os
 from pathlib import Path
 
 # Server (optional if running fully offline)
@@ -10,6 +11,7 @@ SYNC_INTERVAL = 30  # seconds
 KIOSK_ID = "kiosk-entry-1"
 KIOSK_TYPE = "entry"  # entry | exit | auto
 KIOSK_NAME = "Main Entry"
+KIOSK_API_KEY = os.environ.get("KIOSK_API_KEY", "")
 
 # Camera
 CAMERA_INDEX = 0

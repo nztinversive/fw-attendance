@@ -36,6 +36,12 @@ _det_session = None
 _rec_session = None
 
 
+def _validate_encoding_vector(encoding: list[float]) -> bool:
+    if len(encoding) not in {128, 512}:
+        return False
+    return all(np.isfinite(value) for value in encoding)
+
+
 def ensure_models():
     """Download models if not present."""
     for url, path in [(DET_URL, DET_PATH), (REC_URL, REC_PATH)]:
@@ -248,6 +254,8 @@ def encode(req: EncodeRequest):
     norm = float(np.linalg.norm(avg))
     if norm > 0:
         avg = [x / norm for x in avg]
+    if not _validate_encoding_vector(avg):
+        raise HTTPException(422, "Generated encoding had an invalid dimension")
 
     return EncodeResponse(encoding=avg)
 
@@ -267,7 +275,10 @@ def match(req: MatchRequest):
         return MatchResponse(match=None)
 
     emb_arr = np.array(emb)
-    known = np.array([w.encoding for w in req.encodings])
+    valid_encodings = [w for w in req.encodings if _validate_encoding_vector(w.encoding) and len(w.encoding) == len(emb)]
+    if not valid_encodings:
+        return MatchResponse(match=None)
+    known = np.array([w.encoding for w in valid_encodings])
 
     # Cosine similarity (embeddings are already L2-normalized)
     similarities = known @ emb_arr
@@ -278,7 +289,7 @@ def match(req: MatchRequest):
         return MatchResponse(match=None)
 
     return MatchResponse(match=MatchResult(
-        worker_id=req.encodings[best_idx].worker_id,
+        worker_id=valid_encodings[best_idx].worker_id,
         confidence=round(best_sim, 4),
     ))
 

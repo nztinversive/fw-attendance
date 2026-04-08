@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import convex from '@/lib/convex';
 import { api } from '../../../../convex/_generated/api';
+import { getEncodingValidationMessage, isSupportedEncoding } from '@/lib/encoding';
 
 export async function GET(req: NextRequest) {
   const includeEncodings = req.nextUrl.searchParams.get('include_encodings') === 'true';
@@ -14,6 +15,9 @@ export async function POST(req: NextRequest) {
   const { name, department, face_encoding } = body;
 
   if (!name) return NextResponse.json({ error: 'Name required' }, { status: 400 });
+  if (face_encoding !== undefined && !isSupportedEncoding(face_encoding)) {
+    return NextResponse.json({ error: getEncodingValidationMessage('face_encoding') }, { status: 400 });
+  }
 
   const result = await convex.mutation(api.workers.create, {
     name,
@@ -29,6 +33,9 @@ export async function PATCH(req: NextRequest) {
   const { id, name, department, face_encoding } = body;
 
   if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
+  if (face_encoding !== undefined && !isSupportedEncoding(face_encoding)) {
+    return NextResponse.json({ error: getEncodingValidationMessage('face_encoding') }, { status: 400 });
+  }
 
   const updates: Record<string, unknown> = { id };
   if (name !== undefined) updates.name = name;

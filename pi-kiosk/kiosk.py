@@ -39,6 +39,7 @@ MATCH_THRESHOLD = 0.6
 CAPTURE_WIDTH = 640
 CAPTURE_HEIGHT = 480
 COOLDOWN_SECONDS = 30  # prevent duplicate scans
+KIOSK_API_KEY = os.environ.get("KIOSK_API_KEY", "")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +47,12 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("kiosk")
+
+
+def auth_headers() -> dict[str, str]:
+    if not KIOSK_API_KEY:
+        return {}
+    return {"x-kiosk-key": KIOSK_API_KEY}
 
 
 # ─── Camera Abstraction ────────────────────────────────────────
@@ -140,7 +147,11 @@ class EncodingStore:
         import requests
         try:
             # Get all workers with encodings
-            res = requests.get(f"{self.server_url}/api/workers?include_encodings=true", timeout=10)
+            res = requests.get(
+                f"{self.server_url}/api/workers?include_encodings=true",
+                headers=auth_headers(),
+                timeout=10,
+            )
             if res.status_code != 200:
                 log.warning(f"Sync failed: server returned {res.status_code}")
                 return False
@@ -302,6 +313,7 @@ class AttendanceLogger:
                         "kiosk_id": record["kiosk_id"],
                         "timestamp": record["timestamp"],
                     },
+                    headers=auth_headers(),
                     timeout=10,
                 )
                 if res.status_code in (200, 201):

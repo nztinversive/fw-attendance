@@ -1,12 +1,16 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
+function getDateKey(timestamp: string): string {
+  return timestamp.slice(0, 10);
+}
+
 export const list = query({
   args: { date: v.optional(v.string()), workerId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const date = args.date || new Date().toISOString().split("T")[0];
     let records = await ctx.db.query("attendance").collect();
-    records = records.filter((r) => r.timestamp.startsWith(date));
+    records = records.filter((r) => getDateKey(r.timestamp) === date);
     if (args.workerId) records = records.filter((r) => r.workerId === args.workerId);
     records.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 

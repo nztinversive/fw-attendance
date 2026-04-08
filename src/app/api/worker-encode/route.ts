@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import convex from '@/lib/convex';
 import { api } from '../../../../convex/_generated/api';
+import { getEncodingValidationMessage, isSupportedEncoding } from '@/lib/encoding';
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,6 +11,9 @@ export async function POST(req: NextRequest) {
 
     if (!worker_id || !encoding || !Array.isArray(encoding)) {
       return NextResponse.json({ error: 'worker_id and encoding (array) required' }, { status: 400 });
+    }
+    if (!isSupportedEncoding(encoding)) {
+      return NextResponse.json({ error: getEncodingValidationMessage('encoding') }, { status: 400 });
     }
 
     const worker = await convex.query(api.workers.get, { id: worker_id as any });

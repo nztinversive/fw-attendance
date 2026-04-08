@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import convex from '@/lib/convex';
 import { api } from '../../../../convex/_generated/api';
+import { getEncodingValidationMessage, isSupportedEncoding } from '@/lib/encoding';
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,7 +24,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Upload photos to Convex storage
+    let faceEncoding: number[] | undefined;
+    try {
+      const encodeUrl = process.env.FACE_ENCODE_URL || 'http://localhost:5557/encode';
+      const encodeRes = await fetch(encodeUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photos }),
+        signal: AbortSignal.timeout(60000), // 60s — face service cold start + encoding
+      });
+      const encodeBody = await encodeRes.json();
+      if (encodeRes.ok) {
+        faceEncoding = encodeBody.encoding;
+      } else {
+        return NextResponse.json(
+          { error: encodeBody?.detail || encodeBody?.error || 'Face encoding service rejected the enrollment photos' },
+          { status: encodeRes.status === 422 ? 422 : 503 }
+        );
+      }
+    } catch (encodeErr) {
+      console.error('Face encoding failed:', encodeErr);
+      return NextResponse.json(
+        { error: 'Face encoding service is unavailable. Worker was not created.' },
+        { status: 503 }
+      );
+    }
+
+    if (!isSupportedEncoding(faceEncoding)) {
+      return NextResponse.json({ error: getEncodingValidationMessage('Face encoding') }, { status: 422 });
+    }
+
     const storageIds: string[] = [];
     for (const photo of photos) {
       try {
@@ -47,27 +77,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Try face encoding service
-    let faceEncoding: number[] | undefined;
-    try {
-      const encodeUrl = process.env.FACE_ENCODE_URL || 'http://localhost:5557/encode';
-      const encodeRes = await fetch(encodeUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photos }),
-        signal: AbortSignal.timeout(60000), // 60s — face service cold start + encoding
-      });
-      const encodeBody = await encodeRes.json();
-      if (encodeRes.ok) {
-        faceEncoding = encodeBody.encoding;
-        console.log('Face encoding success:', faceEncoding?.length, 'dimensions');
-      } else {
-        console.error('Face encoding service returned', encodeRes.status, encodeBody);
-      }
-    } catch (encodeErr) {
-      console.error('Face encoding failed:', encodeErr);
-    }
-
     const result = await convex.mutation(api.workers.create, {
       name: name.trim(),
       department: department?.trim() || undefined,
@@ -80,7 +89,7 @@ export async function POST(req: NextRequest) {
         id: result.id,
         name: name.trim(),
         photosCount: storageIds.length,
-        encoded: faceEncoding !== undefined,
+        encoded: true,
       },
       { status: 201 }
     );

@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { hasValidAdminSession, hasValidKioskKey, isKioskRequestAllowed, unauthorizedApiResponse } from '@/lib/auth';
 
-// Routes that don't require auth
-const PUBLIC_PATHS = ['/login', '/api/auth/', '/api/health', '/api/attendance', '/api/sync', '/api/workers'];
+const PUBLIC_PATHS = ['/login', '/api/auth/', '/api/health'];
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Allow public routes (API endpoints needed by Pi kiosks + login)
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
@@ -16,9 +15,21 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check auth cookie
-  const authCookie = req.cookies.get('fw-auth');
-  if (!authCookie?.value) {
+  const hasAdminSession = await hasValidAdminSession(req);
+
+  if (pathname.startsWith('/api/')) {
+    if (hasAdminSession) {
+      return NextResponse.next();
+    }
+
+    if (isKioskRequestAllowed(req) && hasValidKioskKey(req)) {
+      return NextResponse.next();
+    }
+
+    return unauthorizedApiResponse();
+  }
+
+  if (!hasAdminSession) {
     return NextResponse.redirect(new URL('/login', req.url));
   }
 

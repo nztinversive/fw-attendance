@@ -143,16 +143,23 @@ def add_worker(
 ) -> int:
     """Insert or update a worker and return worker id."""
     conn = _get_conn()
+    encoding = np.asarray(encoding, dtype=np.float64)
     normalized_name = name.strip()
     if not normalized_name:
         raise ValueError("Worker name is required.")
+    if encoding.ndim != 1 or encoding.size not in {128, 512}:
+        raise ValueError("Worker encoding must be a 128-dim or 512-dim vector.")
 
     photo_paths = photo_paths or []
     payload_blob = _serialize_encoding(encoding)
     photo_paths_json = json.dumps(photo_paths)
     enrolled_at = enrolled_at or datetime.now().isoformat(timespec="seconds")
 
-    row = conn.execute("SELECT id, server_id FROM workers WHERE lower(name) = lower(?)", (normalized_name,)).fetchone()
+    row = None
+    if server_id is not None:
+        row = conn.execute("SELECT id, server_id FROM workers WHERE server_id = ?", (server_id,)).fetchone()
+    if row is None:
+        row = conn.execute("SELECT id, server_id FROM workers WHERE lower(name) = lower(?)", (normalized_name,)).fetchone()
     stored_server_id = server_id
     if row:
         worker_id = int(row["id"])
@@ -184,6 +191,14 @@ def remove_worker(name: str) -> bool:
     """Remove a worker by case-insensitive name."""
     conn = _get_conn()
     cursor = conn.execute("DELETE FROM workers WHERE lower(name) = lower(?)", (name.strip(),))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def remove_worker_by_server_id(server_id: str) -> bool:
+    """Remove a worker by server_id."""
+    conn = _get_conn()
+    cursor = conn.execute("DELETE FROM workers WHERE server_id = ?", (server_id,))
     conn.commit()
     return cursor.rowcount > 0
 

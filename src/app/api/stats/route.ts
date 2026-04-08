@@ -1,14 +1,12 @@
 export const dynamic = 'force-dynamic';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import convex from '@/lib/convex';
 import { api } from '../../../../convex/_generated/api';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    // Seed on first run
-    await convex.mutation(api.seed.run, {});
-
-    const stats = await convex.query(api.stats.get, {});
+    const date = req.nextUrl.searchParams.get('date') || undefined;
+    const stats = await convex.query(api.stats.get, { date });
     return NextResponse.json(stats);
   } catch (error) {
     console.error('Stats error:', error);

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { getLocalDateString } from '@/lib/date';
 
 interface WorkerHours {
   name: string;
@@ -17,26 +18,31 @@ interface DayCount {
   count: number;
 }
 
+function parseLocalDate(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 export default function ReportsPage() {
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
-    return d.toISOString().split('T')[0];
+    return getLocalDateString(d);
   });
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(getLocalDateString());
   const [lateThreshold, setLateThreshold] = useState('06:00');
   const [workerHours, setWorkerHours] = useState<WorkerHours[]>([]);
   const [dailyCounts, setDailyCounts] = useState<DayCount[]>([]);
 
   useEffect(() => {
     const fetchReport = async () => {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = parseLocalDate(startDate);
+      const end = parseLocalDate(endDate);
       const allEvents: { worker_id: string; worker_name: string; worker_department: string; event_type: string; timestamp: string }[] = [];
       const counts: DayCount[] = [];
 
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().split('T')[0];
+        const dateStr = getLocalDateString(d);
         const res = await fetch(`/api/attendance?date=${dateStr}`);
         const events = await res.json();
         allEvents.push(...events);
@@ -69,7 +75,7 @@ export default function ReportsPage() {
         const h = Math.round((diffMs / 3600000) * 10) / 10;
 
         const inDate = new Date(firstIn);
-        const inMinutes = inDate.getUTCHours() * 60 + inDate.getUTCMinutes();
+        const inMinutes = inDate.getHours() * 60 + inDate.getMinutes();
         const late = inMinutes > thresholdMinutes;
 
         hours.push({
@@ -112,7 +118,7 @@ export default function ReportsPage() {
               className="input-field w-auto font-mono" />
           </div>
           <div>
-            <label className="section-label mb-1.5 block">Late After (UTC)</label>
+            <label className="section-label mb-1.5 block">Late After (Local)</label>
             <input type="time" value={lateThreshold} onChange={(e) => setLateThreshold(e.target.value)}
               className="input-field w-auto font-mono" />
           </div>

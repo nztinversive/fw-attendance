@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import AttendanceTable from '@/components/AttendanceTable';
 import { AttendanceWithWorker } from '@/lib/types';
+import { getLocalDateString } from '@/lib/date';
 
 export default function LogPage() {
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getLocalDateString());
   const [events, setEvents] = useState<AttendanceWithWorker[]>([]);
 
   useEffect(() => {

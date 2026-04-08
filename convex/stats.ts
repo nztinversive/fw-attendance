@@ -1,9 +1,25 @@
 import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+function getDateKey(timestamp: string): string {
+  return timestamp.slice(0, 10);
+}
+
+function getMinutesFromTimestamp(timestamp: string): number | null {
+  const match = timestamp.match(/T(\d{2}):(\d{2})/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function getDayOfWeek(dateKey: string): number {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day).getDay();
+}
 
 export const get = query({
-  args: {},
-  handler: async (ctx) => {
-    const today = new Date().toISOString().split("T")[0];
+  args: { date: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const today = args.date || new Date().toISOString().split("T")[0];
 
     const allWorkers = await ctx.db
       .query("workers")
@@ -13,7 +29,7 @@ export const get = query({
 
     // Get today's records
     const allAttendance = await ctx.db.query("attendance").collect();
-    const todayAttendance = allAttendance.filter((a) => a.timestamp.startsWith(today));
+    const todayAttendance = allAttendance.filter((a) => getDateKey(a.timestamp) === today);
 
     // Latest event per worker
     const workerStatus = new Map<string, { eventType: string; timestamp: string }>();
@@ -45,18 +61,20 @@ export const get = query({
 
     let avgArrival: string | null = null;
     if (firstIns.size > 0) {
-      const totalMinutes = [...firstIns.values()].reduce((sum, ts) => {
-        const d = new Date(ts);
-        return sum + d.getUTCHours() * 60 + d.getUTCMinutes();
-      }, 0);
-      const avgMin = Math.round(totalMinutes / firstIns.size);
-      const h = Math.floor(avgMin / 60);
-      const m = avgMin % 60;
-      avgArrival = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+      const arrivalMinutes = [...firstIns.values()]
+        .map((ts) => getMinutesFromTimestamp(ts))
+        .filter((value): value is number => value !== null);
+      if (arrivalMinutes.length > 0) {
+        const totalMinutes = arrivalMinutes.reduce((sum, value) => sum + value, 0);
+        const avgMin = Math.round(totalMinutes / arrivalMinutes.length);
+        const h = Math.floor(avgMin / 60);
+        const m = avgMin % 60;
+        avgArrival = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+      }
     }
 
     // Schedule check
-    const dayOfWeek = new Date().getDay();
+    const dayOfWeek = getDayOfWeek(today);
     const schedules = await ctx.db
       .query("schedules")
       .withIndex("by_active", (q) => q.eq("active", true))

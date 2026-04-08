@@ -93,11 +93,7 @@ export default function EnrollPage() {
 
       const result = await res.json();
       stopCamera();
-      setResultMsg(
-        result.encoded
-          ? `Face encoding saved! ${result.photosCount} photos captured.`
-          : `${result.photosCount} photos saved. Face will be encoded on next kiosk sync.`
-      );
+      setResultMsg(`Face encoding saved. ${result.photosCount} photos captured.`);
       setStep('done');
     } catch (err) {
       stopCamera();
