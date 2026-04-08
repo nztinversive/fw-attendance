@@ -271,7 +271,7 @@ def run(args):
                                 best_idx = i
                         conf = best_sim
                         logger.info("Match: sim=%.3f name=%s", conf, known_names[best_idx])
-                        if conf >= 0.45:
+                        if conf >= 0.30:  # TODO: raise to 0.45 after re-enrollment with Pi camera
                             matched = known_names[best_idx]
                     else:
                         logger.warning("Dim mismatch: known=%d vs live=%d", enc_dim, cand_dim)
