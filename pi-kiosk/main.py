@@ -2,6 +2,7 @@
 """
 FW Gatekeeper - Pi Kiosk Main Entry Point
 Camera feed on main thread. Face detection on background thread.
+Uses dlib for face DETECTION, MobileFaceNet ONNX for face ENCODING (512-dim).
 """
 
 import argparse
@@ -9,7 +10,9 @@ import logging
 import os
 import time
 import threading
+import urllib.request
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -17,7 +20,7 @@ import face_recognition as fr
 
 import config
 import database
-from recognition import FaceRecognizer, cosine_similarities
+from recognition import FaceRecognizer
 from sync import SyncWorker
 import app as web_app
 
@@ -28,11 +31,53 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
+# --- MobileFaceNet ONNX for 512-dim encoding (matches server) ---
+REC_MODEL_URL = "https://huggingface.co/immich-app/buffalo_s/resolve/main/recognition/model.onnx"
+REC_MODEL_PATH = Path("data/models/mobilefacenet.onnx")
+_rec_session = None
+
+
+def ensure_rec_model():
+    REC_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not REC_MODEL_PATH.exists():
+        logger.info("Downloading MobileFaceNet model (13MB)...")
+        urllib.request.urlretrieve(REC_MODEL_URL, str(REC_MODEL_PATH))
+        logger.info("Downloaded MobileFaceNet to %s", REC_MODEL_PATH)
+
+
+def get_rec_session():
+    global _rec_session
+    if _rec_session is None:
+        import onnxruntime as ort
+        ensure_rec_model()
+        _rec_session = ort.InferenceSession(str(REC_MODEL_PATH), providers=["CPUExecutionProvider"])
+        logger.info("MobileFaceNet ONNX session loaded")
+    return _rec_session
+
+
+def get_512_embedding(face_crop_bgr):
+    """Get 512-dim MobileFaceNet embedding from a BGR face crop."""
+    session = get_rec_session()
+    face = cv2.resize(face_crop_bgr, (112, 112))
+    face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+    face_float = face_rgb.astype(np.float32) / 255.0
+    face_float = (face_float - 0.5) / 0.5
+    face_chw = np.transpose(face_float, (2, 0, 1))
+    batch = np.expand_dims(face_chw, axis=0)
+    input_name = session.get_inputs()[0].name
+    outputs = session.run(None, {input_name: batch})
+    emb = outputs[0][0]
+    norm = np.linalg.norm(emb)
+    if norm > 0:
+        emb = emb / norm
+    return emb
+
 
 class Camera:
     def __init__(self, mode="auto"):
         self._cam = None
         self._mode = mode
+        self._is_rgb = False  # True if camera returns RGB (picamera2)
 
     def start(self):
         if self._mode in ("pi", "auto"):
@@ -46,7 +91,8 @@ class Camera:
                 self._cam.start()
                 time.sleep(1)
                 self._mode = "pi"
-                logger.info("Pi Camera initialized")
+                self._is_rgb = True
+                logger.info("Pi Camera initialized (RGB mode)")
                 return
             except Exception as e:
                 if self._mode == "pi":
@@ -59,23 +105,21 @@ class Camera:
         if not self._cam.isOpened():
             raise RuntimeError("No camera available")
         self._mode = "usb"
-        logger.info("USB Camera initialized")
+        self._is_rgb = False
+        logger.info("USB Camera initialized (BGR mode)")
 
-    def capture_bgr(self):
+    def capture(self):
+        """Returns (bgr_frame, rgb_frame)"""
         if self._mode == "pi":
-            arr = self._cam.capture_array()
-            # picamera2 RGB888 returns BGR on some configs, RGB on others
-            # Store raw array and let callers handle conversion
-            return arr
+            rgb = self._cam.capture_array()
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            return bgr, rgb
         else:
-            ret, frame = self._cam.read()
+            ret, bgr = self._cam.read()
             if not ret:
                 raise RuntimeError("Failed to capture frame")
-            return frame
-
-    @property
-    def is_pi(self):
-        return self._mode == "pi"
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            return bgr, rgb
 
     def stop(self):
         if self._cam is None:
@@ -91,8 +135,8 @@ GREEN = (0, 200, 0)
 RED = (0, 0, 220)
 
 
-def draw_box(frame, face_loc, color, label=None):
-    out = frame.copy()
+def draw_box(frame_bgr, face_loc, color, label=None):
+    out = frame_bgr.copy()
     if face_loc is None:
         return out
     top, right, bottom, left = face_loc
@@ -101,6 +145,13 @@ def draw_box(frame, face_loc, color, label=None):
         cv2.putText(out, label, (left, max(20, top - 10)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
     return out
+
+
+def cosine_sim(a, b):
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    if na == 0 or nb == 0:
+        return 0.0
+    return float(np.dot(a, b) / (na * nb))
 
 
 def run(args):
@@ -113,6 +164,9 @@ def run(args):
     os.makedirs(config.FACES_DIR, exist_ok=True)
     os.makedirs(config.MODEL_DIR, exist_ok=True)
     database.init_db()
+
+    # Pre-download MobileFaceNet model
+    ensure_rec_model()
 
     logger.info("Starting web UI on port %d...", config.KIOSK_PORT)
     web_app.start_server()
@@ -135,92 +189,92 @@ def run(args):
 
     # Shared state
     detect_lock = threading.Lock()
-    pending_frame = [None]
-    current_result = [None]  # (face_loc, name, confidence) or None
+    pending_frame = [None]  # (bgr, rgb) tuple
+    current_result = [None]
     detect_count = [0]
 
     last_clocks = {}
     display_until = [0.0]
-
-    # Overlay state
     box_loc = None
     box_color = GOLD
     box_label = None
 
     def detection_loop():
-        """Background: detect faces + match against known workers."""
         logger.info("Detection thread started")
         while True:
-            # Grab frame
             with detect_lock:
-                frame = pending_frame[0]
+                frames = pending_frame[0]
                 pending_frame[0] = None
 
-            if frame is None:
+            if frames is None:
                 time.sleep(0.1)
                 continue
 
+            bgr_frame, rgb_frame = frames
+
             try:
-                h, w = frame.shape[:2]
-                logger.debug("Processing frame %dx%d", w, h)
-
-                # Try as-is first (picamera2 may already be RGB)
-                small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-                locs = fr.face_locations(small, model="hog")
-
-                # If no faces found, try swapping color channels
-                if not locs:
-                    swapped = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    small = cv2.resize(swapped, (0, 0), fx=0.5, fy=0.5)
-                    locs = fr.face_locations(small, model="hog")
+                # Use dlib for face DETECTION (finding where the face is)
+                small_rgb = cv2.resize(rgb_frame, (0, 0), fx=0.5, fy=0.5)
+                locs = fr.face_locations(small_rgb, model="hog")
 
                 detect_count[0] += 1
-                if detect_count[0] == 1:
-                    # Save first frame to disk for debugging
-                    cv2.imwrite("/opt/fw-gatekeeper/pi-kiosk/data/debug_frame.jpg", frame)
-                    logger.info("Saved debug frame to data/debug_frame.jpg")
-                if detect_count[0] % 10 == 1:
-                    logger.info("Detection #%d: frame %s dtype=%s, found %d faces", detect_count[0], frame.shape, frame.dtype, len(locs))
+                if detect_count[0] % 20 == 1:
+                    logger.info("Detection #%d: found %d faces", detect_count[0], len(locs))
 
                 if not locs:
                     current_result[0] = None
                     continue
 
+                # Scale to full resolution
                 top, right, bottom, left = locs[0]
                 face_loc = (top * 2, right * 2, bottom * 2, left * 2)
 
-                encs = fr.face_encodings(small, locs)
-                if not encs:
+                # Crop face from BGR frame for MobileFaceNet encoding
+                ft, fr_, fb, fl = face_loc
+                h, w = bgr_frame.shape[:2]
+                pad = int(max(fb - ft, fr_ - fl) * 0.25)
+                y1 = max(0, ft - pad)
+                y2 = min(h, fb + pad)
+                x1 = max(0, fl - pad)
+                x2 = min(w, fr_ + pad)
+                face_crop = bgr_frame[y1:y2, x1:x2]
+
+                if face_crop.size == 0:
                     current_result[0] = (face_loc, None, 0.0)
                     continue
 
-                candidate = encs[0]
+                # Get 512-dim MobileFaceNet embedding (matches server encoding)
+                try:
+                    embedding = get_512_embedding(face_crop)
+                except Exception as e:
+                    logger.error("ONNX encoding error: %s", e)
+                    current_result[0] = (face_loc, None, 0.0)
+                    continue
+
+                # Match against known workers
                 known_encs, known_ids, known_names = recognizer._snapshot_known_faces()
                 matched = None
                 conf = 0.0
 
                 if known_encs:
-                    # Pi uses dlib (128-dim) for live detection.
-                    # Server stores 512-dim MobileFaceNet encodings.
-                    # They can't be compared directly, so use dlib distance
-                    # only when dimensions match. Otherwise just show the box.
                     enc_dim = len(known_encs[0])
-                    cand_dim = len(candidate)
-                    logger.info("Matching: known=%d-dim, candidate=%d-dim", enc_dim, cand_dim)
+                    cand_dim = len(embedding)
 
                     if enc_dim == cand_dim:
-                        # Same dimension - can compare directly
-                        dists = fr.face_distance(known_encs, candidate)
-                        best = int(np.argmin(dists))
-                        conf = max(0.0, 1.0 - float(dists[best]))
-                        logger.info("Match dist=%.3f conf=%.3f name=%s", float(dists[best]), conf, known_names[best])
-                        if dists[best] <= config.RECOGNITION_TOLERANCE:
-                            matched = known_names[best]
+                        # Both 512-dim - cosine similarity
+                        best_sim = -1
+                        best_idx = 0
+                        for i, known in enumerate(known_encs):
+                            sim = cosine_sim(np.array(known), embedding)
+                            if sim > best_sim:
+                                best_sim = sim
+                                best_idx = i
+                        conf = best_sim
+                        logger.info("Match: sim=%.3f name=%s", conf, known_names[best_idx])
+                        if conf >= 0.3:
+                            matched = known_names[best_idx]
                     else:
-                        # Dimension mismatch - can't compare
-                        # Mark as detected but unmatched
-                        logger.warning("Encoding dimension mismatch: known=%d vs candidate=%d. Cannot match.", enc_dim, cand_dim)
-                        conf = 0.0
+                        logger.warning("Dim mismatch: known=%d vs live=%d", enc_dim, cand_dim)
 
                 current_result[0] = (face_loc, matched, conf)
 
@@ -233,12 +287,12 @@ def run(args):
 
     web_app.update_status(state="IDLE", message="Step toward camera",
                           known_workers=recognizer.known_count, face_detected=False)
-    logger.info("Kiosk ready - main loop starting")
+    logger.info("Kiosk ready")
 
     try:
         while True:
             try:
-                frame = camera.capture_bgr()
+                bgr_frame, rgb_frame = camera.capture()
             except Exception as e:
                 logger.error("Capture error: %s", e)
                 time.sleep(1)
@@ -246,20 +300,20 @@ def run(args):
 
             now = time.time()
 
-            # 1. Push frame to stream (always, never blocks)
-            web_app.set_frame(draw_box(frame, box_loc, box_color, box_label))
+            # 1. Push BGR frame to MJPEG stream (always, never blocks)
+            web_app.set_frame(draw_box(bgr_frame, box_loc, box_color, box_label))
 
-            # 2. Feed frame to detection thread
+            # 2. Feed to detection thread
             with detect_lock:
                 if pending_frame[0] is None:
-                    pending_frame[0] = frame.copy()
+                    pending_frame[0] = (bgr_frame.copy(), rgb_frame.copy())
 
-            # 3. Skip processing during display hold
+            # 3. Skip during display hold
             if now < display_until[0]:
                 time.sleep(0.05)
                 continue
 
-            # 4. Check latest detection result
+            # 4. Process detection result
             result = current_result[0]
 
             if result is None:
@@ -283,7 +337,6 @@ def run(args):
                 display_until[0] = now + config.DISPLAY_TIME_SEC
                 continue
 
-            # Matched!
             box_color = GREEN
             box_label = name
 

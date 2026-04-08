@@ -7,3 +7,4 @@ flask
 opencv-python-headless
 dlib
 scipy
+onnxruntime
