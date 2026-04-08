@@ -23,9 +23,9 @@ LIVENESS_TIMEOUT_SEC = 5
 RECOGNITION_TOLERANCE = 0.5
 
 # Gatekeeper behavior
-CLOCK_DEBOUNCE_MINUTES = 5
+CLOCK_DEBOUNCE_MINUTES = 60  # Don't re-scan same person for 1 hour
 AUTO_CLOCKOUT_HOURS = 12
-DISPLAY_TIME_SEC = 3
+DISPLAY_TIME_SEC = 5  # Show result for 5 seconds before scanning again
 
 # Web server
 FLASK_HOST = "0.0.0.0"
