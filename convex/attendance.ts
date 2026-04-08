@@ -52,6 +52,17 @@ export const create = mutation({
   },
 });
 
+export const clearAll = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db.query("attendance").collect();
+    for (const r of all) {
+      await ctx.db.delete(r._id);
+    }
+    return { deleted: all.length };
+  },
+});
+
 export const bulkCreate = mutation({
   args: {
     events: v.array(

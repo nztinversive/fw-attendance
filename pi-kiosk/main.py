@@ -351,8 +351,9 @@ def run(args):
 
             last = last_clocks.get(worker_id)
             if last and datetime.now() - last < timedelta(minutes=config.CLOCK_DEBOUNCE_MINUTES):
+                pct = int(confidence * 100)
                 web_app.update_status(state="ALREADY_CLOCKED",
-                                      message=f"Already scanned, {name}!",
+                                      message=f"Already clocked in, {name}! ({pct}%)",
                                       worker_name=name, face_detected=True,
                                       confidence=confidence,
                                       known_workers=recognizer.known_count)
