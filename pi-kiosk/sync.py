@@ -32,22 +32,71 @@ def sync_attendance() -> bool:
     if not logs:
         return True
 
+    payload_logs = []
+    synced_log_ids = []
+    missing_mappings = 0
+    server_id_cache: dict[int, Optional[str]] = {}
+
+    for log in logs:
+        local_worker_id = int(log["worker_id"])
+        if local_worker_id not in server_id_cache:
+            server_id_cache[local_worker_id] = database.get_server_id(local_worker_id)
+        server_id = server_id_cache[local_worker_id]
+        if not server_id:
+            missing_mappings += 1
+            logger.error(
+                "Skipping attendance log %s: no server_id for local worker_id=%s worker_name=%s",
+                log["id"],
+                local_worker_id,
+                log.get("worker_name"),
+            )
+            continue
+
+        payload_logs.append(
+            {
+                "worker_id": server_id,
+                "worker_name": log.get("worker_name"),
+                "event_type": log.get("event_type") or log.get("action"),
+                "action": log.get("action"),
+                "timestamp": log.get("timestamp"),
+                "liveness_confirmed": log.get("liveness_confirmed"),
+                "confidence": log.get("confidence"),
+                "kiosk_id": log.get("kiosk_id") or config.KIOSK_ID,
+                "note": log.get("note"),
+            }
+        )
+        synced_log_ids.append(int(log["id"]))
+
+    if not payload_logs:
+        logger.error(
+            "Attendance sync aborted: %d unsynced logs found, but none had a server_id mapping",
+            len(logs),
+        )
+        return False
+
     try:
         r = requests.post(
             f"{config.SERVER_URL}/api/attendance/bulk",
-            json={"kiosk_id": config.KIOSK_ID, "logs": logs},
+            json={"kiosk_id": config.KIOSK_ID, "logs": payload_logs},
             timeout=15,
         )
         if r.status_code == 200:
-            log_ids = [log["id"] for log in logs]
-            database.mark_synced(log_ids)
-            logger.info("Synced %d gatekeeper logs to server", len(logs))
-            return True
+            database.mark_synced(synced_log_ids)
+            logger.info(
+                "Synced %d gatekeeper logs to server%s",
+                len(synced_log_ids),
+                f"; {missing_mappings} still waiting for worker mappings" if missing_mappings else "",
+            )
+            return missing_mappings == 0
         else:
-            logger.warning("Server returned %d during gatekeeper sync", r.status_code)
+            logger.error(
+                "Attendance sync failed with status=%d body=%s",
+                r.status_code,
+                r.text[:1000],
+            )
             return False
-    except requests.RequestException as e:
-        logger.warning("gatekeeper sync failed: %s", e)
+    except requests.RequestException:
+        logger.exception("Attendance sync request failed")
         return False
 
 
@@ -69,11 +118,14 @@ def sync_workers() -> bool:
         workers = data.get("workers", [])
 
         for w in workers:
+            server_id = w.get("id")
             name = w.get("name")
             encoding_data = w.get("face_encoding")
             photo_url = w.get("photo_url")
+            enrolled_at = w.get("enrolled_at")
 
-            if not name or not encoding_data:
+            if not server_id or not name or encoding_data is None:
+                logger.warning("Skipping worker sync row with missing required fields: %s", w)
                 continue
 
             encoding = np.array(encoding_data, dtype=np.float64)
@@ -83,8 +135,14 @@ def sync_workers() -> bool:
             if photo_url:
                 photo_path = _download_photo(name, photo_url)
 
-            database.add_worker(name, encoding, photo_path)
-            logger.info("Synced worker: %s", name)
+            database.add_worker(
+                name=name,
+                encoding=encoding,
+                photo_paths=[photo_path] if photo_path else [],
+                enrolled_at=enrolled_at,
+                server_id=str(server_id),
+            )
+            logger.info("Synced worker: %s (server_id=%s)", name, server_id)
 
         database.set_sync_state("last_worker_sync", datetime.now().isoformat())
         logger.info("Worker sync complete: %d workers", len(workers))
@@ -143,10 +201,11 @@ class SyncWorker:
             try:
                 self.server_online = check_server()
                 if self.server_online:
-                    sync_attendance()
-                    if sync_workers():
+                    workers_synced = sync_workers()
+                    if workers_synced:
                         if self._recognizer:
                             self._recognizer.reload_faces()
+                    sync_attendance()
                 else:
                     logger.debug("Server offline, skipping sync")
             except Exception as e:

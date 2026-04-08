@@ -63,7 +63,8 @@ def init_db():
             encoding_blob BLOB NOT NULL,
             enrolled_at TEXT NOT NULL DEFAULT (datetime('now')),
             photo_count INTEGER NOT NULL DEFAULT 0,
-            photo_paths TEXT NOT NULL DEFAULT '[]'
+            photo_paths TEXT NOT NULL DEFAULT '[]',
+            server_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS attendance_log (
@@ -94,6 +95,7 @@ def init_db():
     _ensure_column(conn, "workers", "enrolled_at", "enrolled_at TEXT DEFAULT (datetime('now'))")
     _ensure_column(conn, "workers", "photo_count", "photo_count INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "workers", "photo_paths", "photo_paths TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "workers", "server_id", "server_id TEXT")
 
     _ensure_column(
         conn,
@@ -137,6 +139,7 @@ def add_worker(
     encoding: np.ndarray,
     photo_paths: Optional[list[str]] = None,
     enrolled_at: Optional[str] = None,
+    server_id: Optional[str] = None,
 ) -> int:
     """Insert or update a worker and return worker id."""
     conn = _get_conn()
@@ -149,29 +152,31 @@ def add_worker(
     photo_paths_json = json.dumps(photo_paths)
     enrolled_at = enrolled_at or datetime.now().isoformat(timespec="seconds")
 
-    row = conn.execute("SELECT id FROM workers WHERE lower(name) = lower(?)", (normalized_name,)).fetchone()
+    row = conn.execute("SELECT id, server_id FROM workers WHERE lower(name) = lower(?)", (normalized_name,)).fetchone()
+    stored_server_id = server_id
     if row:
         worker_id = int(row["id"])
+        stored_server_id = server_id if server_id is not None else row["server_id"]
         conn.execute(
             """
             UPDATE workers
-            SET name = ?, encoding_blob = ?, enrolled_at = ?, photo_count = ?, photo_paths = ?
+            SET name = ?, encoding_blob = ?, enrolled_at = ?, photo_count = ?, photo_paths = ?, server_id = ?
             WHERE id = ?
             """,
-            (normalized_name, payload_blob, enrolled_at, len(photo_paths), photo_paths_json, worker_id),
+            (normalized_name, payload_blob, enrolled_at, len(photo_paths), photo_paths_json, stored_server_id, worker_id),
         )
     else:
         cursor = conn.execute(
             """
-            INSERT INTO workers (name, encoding_blob, enrolled_at, photo_count, photo_paths)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO workers (name, encoding_blob, enrolled_at, photo_count, photo_paths, server_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (normalized_name, payload_blob, enrolled_at, len(photo_paths), photo_paths_json),
+            (normalized_name, payload_blob, enrolled_at, len(photo_paths), photo_paths_json, server_id),
         )
         worker_id = int(cursor.lastrowid)
 
     conn.commit()
-    logger.info("Saved worker: %s (id=%d)", normalized_name, worker_id)
+    logger.info("Saved worker: %s (id=%d, server_id=%s)", normalized_name, worker_id, stored_server_id)
     return worker_id
 
 
@@ -187,7 +192,7 @@ def get_worker_by_name(name: str) -> Optional[dict]:
     """Fetch worker by name (case-insensitive)."""
     conn = _get_conn()
     row = conn.execute(
-        "SELECT id, name, encoding_blob, enrolled_at, photo_count, photo_paths FROM workers WHERE lower(name)=lower(?)",
+        "SELECT id, name, encoding_blob, enrolled_at, photo_count, photo_paths, server_id FROM workers WHERE lower(name)=lower(?)",
         (name.strip(),),
     ).fetchone()
     if not row:
@@ -201,6 +206,7 @@ def get_worker_by_name(name: str) -> Optional[dict]:
         "enrolled_at": row["enrolled_at"],
         "photo_count": int(row["photo_count"] or 0),
         "photo_paths": json.loads(row["photo_paths"] or "[]"),
+        "server_id": row["server_id"],
     }
 
 
@@ -208,7 +214,7 @@ def get_all_workers() -> list[dict]:
     """Return all workers with decoded encodings."""
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT id, name, encoding_blob, enrolled_at, photo_count, photo_paths FROM workers ORDER BY name ASC"
+        "SELECT id, name, encoding_blob, enrolled_at, photo_count, photo_paths, server_id FROM workers ORDER BY name ASC"
     ).fetchall()
     workers = []
     for row in rows:
@@ -222,6 +228,7 @@ def get_all_workers() -> list[dict]:
                 "enrolled_at": row["enrolled_at"],
                 "photo_count": int(row["photo_count"] or 0),
                 "photo_paths": json.loads(row["photo_paths"] or "[]"),
+                "server_id": row["server_id"],
             }
         )
     return workers
@@ -237,9 +244,19 @@ def list_workers() -> list[dict]:
             "enrolled_at": worker["enrolled_at"],
             "photo_count": worker["photo_count"],
             "photo_paths": worker["photo_paths"],
+            "server_id": worker["server_id"],
         }
         for worker in workers
     ]
+
+
+def get_server_id(local_id: int) -> Optional[str]:
+    """Return the Convex worker id for a local SQLite worker id."""
+    conn = _get_conn()
+    row = conn.execute("SELECT server_id FROM workers WHERE id = ?", (int(local_id),)).fetchone()
+    if not row:
+        return None
+    return row["server_id"]
 
 
 def get_worker_encodings() -> tuple[list[np.ndarray], list[int], list[str]]:
