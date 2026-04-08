@@ -271,7 +271,7 @@ def run(args):
                                 best_idx = i
                         conf = best_sim
                         logger.info("Match: sim=%.3f name=%s", conf, known_names[best_idx])
-                        if conf >= 0.3:
+                        if conf >= 0.45:
                             matched = known_names[best_idx]
                     else:
                         logger.warning("Dim mismatch: known=%d vs live=%d", enc_dim, cand_dim)
@@ -374,7 +374,8 @@ def run(args):
             last_clocks[worker_id] = datetime.now()
 
             time_str = datetime.now().strftime("%I:%M %p")
-            msg = f"Welcome, {name}! - {time_str}" if action == "clock_in" else f"Goodbye, {name}! - {time_str}"
+            pct = int(confidence * 100)
+            msg = f"Welcome, {name}! ({pct}%) - {time_str}" if action == "clock_in" else f"Goodbye, {name}! ({pct}%) - {time_str}"
 
             web_app.update_status(state="CLOCKED_IN", message=msg,
                                   worker_name=name, action=action,
