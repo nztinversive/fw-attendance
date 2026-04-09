@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     }
 
     const existingWorker = await convex.query(api.workers.findByName, { name: normalizedName });
-    if (existingWorker) {
+    if (existingWorker?.active) {
       return NextResponse.json({ error: 'Worker name already exists' }, { status: 409 });
     }
 
