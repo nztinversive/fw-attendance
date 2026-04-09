@@ -10,14 +10,21 @@ function isSupportedFaceEncoding(encoding?: number[]) {
   );
 }
 
+function normalizeName(name: string) {
+  return name.trim().replace(/\s+/g, " ");
+}
+
+function normalizeDepartment(department?: string) {
+  return department?.trim() || "";
+}
+
 async function findWorkerByName(ctx: any, name: string) {
-  const normalizedName = name.trim().toLowerCase();
-  if (!normalizedName) {
+  const normalizedLower = normalizeName(name).toLocaleLowerCase();
+  if (!normalizedLower) {
     return null;
   }
-
   const workers = await ctx.db.query("workers").collect();
-  return workers.find((worker: any) => worker.name.trim().toLowerCase() === normalizedName) || null;
+  return workers.find((worker: any) => worker.name.trim().toLocaleLowerCase() === normalizedLower) || null;
 }
 
 export const list = query({
@@ -56,28 +63,44 @@ export const create = mutation({
     photoStorageIds: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args) => {
-    const name = args.name.trim();
+    const name = normalizeName(args.name);
     if (!name) {
       throw new Error("Worker name is required");
-    }
-    const existing = await findWorkerByName(ctx, name);
-    if (existing) {
-      throw new Error("Worker name already exists");
     }
     if (!isSupportedFaceEncoding(args.faceEncoding)) {
       throw new Error("faceEncoding must contain 128 or 512 finite values");
     }
     const now = new Date().toISOString();
+    const department = normalizeDepartment(args.department);
+    const existing = await findWorkerByName(ctx, name);
+
+    if (existing?.active) {
+      throw new Error("Worker name already exists");
+    }
+
+    if (existing && !existing.active) {
+      await ctx.db.patch(existing._id, {
+        name,
+        department,
+        faceEncoding: args.faceEncoding,
+        photoStorageIds: args.photoStorageIds,
+        enrolledAt: now,
+        updatedAt: now,
+        active: true,
+      });
+      return { id: existing._id, name, department };
+    }
+
     const id = await ctx.db.insert("workers", {
       name,
-      department: args.department || "",
+      department,
       faceEncoding: args.faceEncoding,
       photoStorageIds: args.photoStorageIds,
       enrolledAt: now,
       updatedAt: now,
       active: true,
     });
-    return { id, name, department: args.department || "" };
+    return { id, name, department };
   },
 });
 
@@ -111,13 +134,17 @@ export const update = mutation({
       throw new Error("faceEncoding must contain 128 or 512 finite values");
     }
     if (fields.name !== undefined) {
-      const trimmedName = fields.name.trim();
+      const trimmedName = normalizeName(fields.name);
       if (!trimmedName) {
         throw new Error("Worker name is required");
       }
+      const existing = await findWorkerByName(ctx, trimmedName);
+      if (existing && existing._id !== id && existing.active) {
+        throw new Error("Worker name already exists");
+      }
       updates.name = trimmedName;
     }
-    if (fields.department !== undefined) updates.department = fields.department;
+    if (fields.department !== undefined) updates.department = normalizeDepartment(fields.department);
     if (fields.faceEncoding !== undefined) updates.faceEncoding = fields.faceEncoding;
     if (fields.photoStorageIds !== undefined) updates.photoStorageIds = fields.photoStorageIds;
     updates.updatedAt = new Date().toISOString();
