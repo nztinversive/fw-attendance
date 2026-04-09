@@ -147,7 +147,18 @@ If `.local` doesn't resolve, find the Pi's IP from your router admin page:
 ssh pi@192.168.1.XXX
 ```
 
-## Step 3: Run the Setup Script
+## Step 3: Set Security Secrets
+
+Before bringing kiosks online, configure the shared secrets used for dashboard auth and kiosk sync:
+
+1. In Render (`fw-gatekeeper` → **Environment**), set:
+   - `KIOSK_API_KEY` to a long random shared secret
+   - `AUTH_SECRET` to a long random signing key for admin session cookies
+2. Use the **same** `KIOSK_API_KEY` value on every Pi kiosk
+
+> The dashboard no longer auto-seeds demo data. Enroll real workers before expecting kiosks to recognize anyone.
+
+## Step 4: Run the Setup Script
 
 Once you have a terminal open (either on the Pi desktop or via SSH), run these commands.
 
@@ -172,11 +183,19 @@ sudo KIOSK_ID=kiosk-exit-1 KIOSK_NAME="Main Exit" KIOSK_TYPE=exit bash setup.sh
 sudo KIOSK_ID=kiosk-exit-2 KIOSK_NAME="Loading Dock" KIOSK_TYPE=exit bash setup.sh
 ```
 
+After `setup.sh` finishes on each Pi, set the same shared kiosk key in `config_local.py`:
+
+```bash
+sudo tee -a /opt/fw-gatekeeper/pi-kiosk/config_local.py >/dev/null <<'EOF'
+KIOSK_API_KEY = "replace-with-the-same-render-kiosk-api-key"
+EOF
+```
+
 > ⏱ Setup takes **15-25 minutes** per Pi (mostly compiling dlib). Go set up the next Pi while this one builds.
 > 
 > 💡 **Tip:** If typing long commands on the Pi is annoying, you can open Firefox on the Pi desktop, go to the [README on GitHub](https://github.com/nztinversive/fw-gatekeeper), and copy-paste the commands from there.
 
-## Step 4: Connect the Hardware
+## Step 5: Connect the Hardware
 
 Before running setup (or after — order doesn't matter):
 
@@ -194,7 +213,7 @@ ls /dev/video*   # should show /dev/video0
 libcamera-hello --timeout 5000
 ```
 
-## Step 5: Enroll Workers on the Dashboard
+## Step 6: Enroll Workers on the Dashboard
 
 Before the kiosks can recognize anyone, enroll workers:
 
@@ -203,12 +222,14 @@ Before the kiosks can recognize anyone, enroll workers:
 3. Click **Enroll Face** in the sidebar
 4. Enter the worker's name and department
 5. Capture 3 photos (look straight at camera, good lighting)
-6. The face encoding service generates a 512-dim face vector automatically
+6. The worker is only created if the face encoding service returns a valid face vector
 7. Repeat for all workers
 
 > 💡 **Tip:** Enroll in a well-lit area. Have workers remove hats/sunglasses. 3 slightly different angles (straight, slight left, slight right) improves recognition.
+>
+> If face encoding is unavailable, enrollment now fails instead of creating an unusable worker record.
 
-## Step 6: Start the Kiosks
+## Step 7: Start the Kiosks
 
 ```bash
 # Start the face scanner + web UI
@@ -240,7 +261,7 @@ After reboot:
 - Once the desktop loads, Firefox opens fullscreen showing the Gatekeeper UI
 - No SSH or manual start needed
 
-## Step 7: Repeat for All 4 Kiosks
+## Step 8: Repeat for All 4 Kiosks
 
 Flash → SSH → Connect hardware → Run setup script (with unique KIOSK_ID) → Enroll workers (only once, on the web) → Start → Reboot → Verify monitor displays kiosk UI.
 
@@ -410,6 +431,8 @@ Set the `ADMIN_PIN` environment variable on Render:
 |----------|-------|-------------|
 | `NEXT_PUBLIC_CONVEX_URL` | `https://modest-bat-146.convex.cloud` | Convex prod URL |
 | `ADMIN_PIN` | `4729` | Dashboard login PIN |
+| `AUTH_SECRET` | long random secret | Signing key for admin session cookies (required for dashboard auth) |
+| `KIOSK_API_KEY` | long random shared secret | Shared secret between server and Pi kiosks (required for sync) |
 | `FACE_ENCODE_URL` | `https://fw-face-service.onrender.com/encode` | Face encoding service |
 
 ### Kiosk Setup Variables
@@ -420,6 +443,7 @@ Set the `ADMIN_PIN` environment variable on Render:
 | `KIOSK_NAME` | `FW Kiosk` | Display name |
 | `KIOSK_TYPE` | `entry` | `entry` or `exit` |
 | `SERVER_URL` | `https://fw-gatekeeper.onrender.com` | Dashboard server URL |
+| `KIOSK_API_KEY` | `""` | Shared secret between server and Pi kiosks (required for sync) |
 
 ### Kiosk CLI Options
 
