@@ -11,6 +11,7 @@
 #    KIOSK_NAME   Display name (default: FW Kiosk)
 #    KIOSK_TYPE   entry | exit (default: entry)
 #    SERVER_URL   Gatekeeper server (default: https://fw-gatekeeper.onrender.com)
+#    KIOSK_API_KEY Shared secret for kiosk API access (required in production)
 # ═══════════════════════════════════════════════════════════════
 
 set -eo pipefail
@@ -19,6 +20,7 @@ KIOSK_ID="${KIOSK_ID:-kiosk-1}"
 KIOSK_NAME="${KIOSK_NAME:-FW Kiosk}"
 KIOSK_TYPE="${KIOSK_TYPE:-entry}"
 SERVER_URL="${SERVER_URL:-https://fw-gatekeeper.onrender.com}"
+KIOSK_API_KEY="${KIOSK_API_KEY:-}"
 KIOSK_USER="${KIOSK_USER:-$(logname 2>/dev/null || echo pi)}"
 INSTALL_DIR="/opt/fw-gatekeeper"
 
@@ -29,6 +31,7 @@ echo "║   Kiosk ID:   $KIOSK_ID"
 echo "║   Kiosk Name: $KIOSK_NAME"
 echo "║   Type:       $KIOSK_TYPE"
 echo "║   Server:     $SERVER_URL"
+echo "║   API Key:    ${KIOSK_API_KEY:+configured}"
 echo "╚═══════════════════════════════════════════════════╝"
 echo ""
 
@@ -99,6 +102,7 @@ SERVER_URL = "$SERVER_URL"
 KIOSK_ID = "$KIOSK_ID"
 KIOSK_TYPE = "$KIOSK_TYPE"
 KIOSK_NAME = "$KIOSK_NAME"
+KIOSK_API_KEY = "$KIOSK_API_KEY"
 CONFEOF
 
 # Patch config.py to load local overrides
@@ -205,7 +209,6 @@ EOF
 
 systemctl daemon-reload
 systemctl enable fw-gatekeeper-kiosk.service
-systemctl enable fw-gatekeeper-display.service
 systemctl enable fw-gatekeeper-watchdog.timer
 
 # ─── 7. Auto-login ─────────────────────────────────────────────
