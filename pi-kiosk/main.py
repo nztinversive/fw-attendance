@@ -11,6 +11,7 @@ import os
 import time
 import threading
 import urllib.request
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -167,6 +168,17 @@ def cosine_sim(a, b):
     return float(np.dot(a, b) / (na * nb))
 
 
+def normalize_embedding(embedding):
+    norm = np.linalg.norm(embedding)
+    if norm > 0:
+        return embedding / norm
+    return embedding
+
+
+def largest_face(face_locations):
+    return max(face_locations, key=lambda loc: (loc[2] - loc[0]) * (loc[1] - loc[3]))
+
+
 def run(args):
     if args.server:
         config.SERVER_URL = args.server
@@ -222,9 +234,11 @@ def run(args):
     box_loc = None
     box_color = GOLD
     box_label = None
+    unknown_streak = 0
 
     def detection_loop():
         logger.info("Detection thread started")
+        embedding_history = deque(maxlen=config.RECOGNITION_EMBEDDING_WINDOW)
         while True:
             with detect_lock:
                 frames = pending_frame[0]
@@ -246,11 +260,12 @@ def run(args):
                     logger.info("Detection #%d: found %d faces", detect_count[0], len(locs))
 
                 if not locs:
+                    embedding_history.clear()
                     current_result[0] = None
                     continue
 
                 # Scale to full resolution
-                top, right, bottom, left = locs[0]
+                top, right, bottom, left = largest_face(locs)
                 face_loc = (top * 2, right * 2, bottom * 2, left * 2)
 
                 # Crop face from BGR frame for MobileFaceNet encoding
@@ -264,6 +279,7 @@ def run(args):
                 face_crop = bgr_frame[y1:y2, x1:x2]
 
                 if face_crop.size == 0:
+                    embedding_history.clear()
                     current_result[0] = (face_loc, None, 0.0)
                     continue
 
@@ -272,8 +288,12 @@ def run(args):
                     embedding = get_512_embedding(face_crop)
                 except Exception as e:
                     logger.error("ONNX encoding error: %s", e)
+                    embedding_history.clear()
                     current_result[0] = (face_loc, None, 0.0)
                     continue
+
+                embedding_history.append(embedding)
+                smoothed_embedding = normalize_embedding(np.mean(np.stack(embedding_history), axis=0))
 
                 # Match against known workers
                 known_encs, known_ids, known_names = recognizer._snapshot_known_faces()
@@ -282,19 +302,19 @@ def run(args):
 
                 if known_encs:
                     enc_dim = len(known_encs[0])
-                    cand_dim = len(embedding)
+                    cand_dim = len(smoothed_embedding)
 
                     if enc_dim == cand_dim:
                         # Both 512-dim - cosine similarity
                         best_sim = -1
                         best_idx = 0
                         for i, known in enumerate(known_encs):
-                            sim = cosine_sim(np.array(known), embedding)
+                            sim = cosine_sim(np.array(known), smoothed_embedding)
                             if sim > best_sim:
                                 best_sim = sim
                                 best_idx = i
                         conf = best_sim
-                        logger.info("Match: sim=%.3f name=%s", conf, known_names[best_idx])
+                        logger.info("Match: sim=%.3f name=%s window=%d", conf, known_names[best_idx], len(embedding_history))
                         if conf >= 0.30:  # TODO: raise to 0.45 after re-enrollment with Pi camera
                             matched = known_names[best_idx]
                     else:
@@ -341,6 +361,7 @@ def run(args):
             result = current_result[0]
 
             if result is None:
+                unknown_streak = 0
                 if box_loc is not None:
                     box_loc = None
                     box_label = None
@@ -353,14 +374,21 @@ def run(args):
             box_loc = face_loc
 
             if name is None:
-                box_color = RED
+                unknown_streak += 1
+                box_color = GOLD if unknown_streak < config.RECOGNITION_UNKNOWN_STREAK else RED
                 box_label = None
-                web_app.update_status(state="NOT_RECOGNIZED", message="Face not recognized",
-                                      face_detected=True, confidence=confidence,
-                                      known_workers=recognizer.known_count)
-                display_until[0] = now + config.DISPLAY_TIME_SEC
+                if unknown_streak < config.RECOGNITION_UNKNOWN_STREAK:
+                    web_app.update_status(state="IDLE", message="Hold steady...",
+                                          face_detected=True, confidence=confidence,
+                                          known_workers=recognizer.known_count)
+                else:
+                    web_app.update_status(state="NOT_RECOGNIZED", message="Face not recognized",
+                                          face_detected=True, confidence=confidence,
+                                          known_workers=recognizer.known_count)
+                    display_until[0] = now + config.DISPLAY_TIME_SEC
                 continue
 
+            unknown_streak = 0
             box_color = GREEN
             box_label = name
 
