@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
       eventType: e.event_type || e.action,
       kioskId: e.kiosk_id || bulkKioskId || undefined,
       timestamp: e.timestamp,
+      idempotencyKey: e.idempotency_key || e.idempotencyKey || e.id || undefined,
       workerName: e.worker_name || e.workerName || undefined,
       confidence: typeof e.confidence === 'number' ? e.confidence : undefined,
       livenessConfirmed:

@@ -10,6 +10,16 @@ function isSupportedFaceEncoding(encoding?: number[]) {
   );
 }
 
+async function findWorkerByName(ctx: any, name: string) {
+  const normalizedName = name.trim().toLowerCase();
+  if (!normalizedName) {
+    return null;
+  }
+
+  const workers = await ctx.db.query("workers").collect();
+  return workers.find((worker: any) => worker.name.trim().toLowerCase() === normalizedName) || null;
+}
+
 export const list = query({
   args: { includeEncodings: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
@@ -50,6 +60,10 @@ export const create = mutation({
     if (!name) {
       throw new Error("Worker name is required");
     }
+    const existing = await findWorkerByName(ctx, name);
+    if (existing) {
+      throw new Error("Worker name already exists");
+    }
     if (!isSupportedFaceEncoding(args.faceEncoding)) {
       throw new Error("faceEncoding must contain 128 or 512 finite values");
     }
@@ -64,6 +78,21 @@ export const create = mutation({
       active: true,
     });
     return { id, name, department: args.department || "" };
+  },
+});
+
+export const findByName = query({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    const worker = await findWorkerByName(ctx, args.name);
+    if (!worker) {
+      return null;
+    }
+    return {
+      id: worker._id,
+      name: worker.name,
+      active: worker.active ? 1 : 0,
+    };
   },
 });
 
@@ -110,7 +139,10 @@ export const listForSync = query({
   handler: async (ctx, args) => {
     const all = await ctx.db.query("workers").collect();
     const since = args.since || "1970-01-01T00:00:00.000Z";
-    const filtered = all.filter((w) => (w.updatedAt || w.enrolledAt) > since);
+    const filtered = all.filter((w) => {
+      const updatedAt = w.updatedAt || w.enrolledAt;
+      return Boolean(updatedAt) && updatedAt > since;
+    });
     const result = [];
     for (const w of filtered) {
       let photoUrls: string[] = [];

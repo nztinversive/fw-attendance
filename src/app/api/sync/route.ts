@@ -11,10 +11,15 @@ export async function GET(req: NextRequest) {
 
   // Update kiosk last_sync
   try {
-    await convex.mutation(api.kiosks.updateLastSync, {
-      id: kioskId as any,
-      lastSync: new Date().toISOString(),
+    const kiosk = await convex.query(api.kiosks.findByKioskId, {
+      kioskId,
     });
+    if (kiosk?.id) {
+      await convex.mutation(api.kiosks.updateLastSync, {
+        id: kiosk.id as any,
+        lastSync: new Date().toISOString(),
+      });
+    }
   } catch {
     // Kiosk might not exist yet
   }

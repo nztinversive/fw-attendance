@@ -9,11 +9,13 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { name, type, location } = await req.json();
+  const body = await req.json();
+  const { name, kiosk_id, kioskId, type, location } = body;
   if (!name || !type) return NextResponse.json({ error: 'name and type required' }, { status: 400 });
 
   const result = await convex.mutation(api.kiosks.create, {
     name,
+    kioskId: kiosk_id || kioskId || undefined,
     type,
     location: location || undefined,
   });

@@ -1,10 +1,10 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { listAttendanceByTimestampRange } from "./attendance";
 
 function getDateKey(timestamp: string): string {
   return timestamp.slice(0, 10);
 }
-
 function getMinutesFromTimestamp(timestamp: string): number | null {
   const match = timestamp.match(/T(\d{2}):(\d{2})/);
   if (!match) return null;
@@ -28,8 +28,7 @@ export const get = query({
     const totalWorkers = allWorkers.length;
 
     // Get today's records
-    const allAttendance = await ctx.db.query("attendance").collect();
-    const todayAttendance = allAttendance.filter((a) => getDateKey(a.timestamp) === today);
+    const todayAttendance = await listAttendanceByTimestampRange(ctx, today);
 
     // Latest event per worker
     const workerStatus = new Map<string, { eventType: string; timestamp: string }>();

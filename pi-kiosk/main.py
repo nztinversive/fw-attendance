@@ -193,13 +193,23 @@ def run(args):
     sync_worker.start()
 
     camera = Camera(mode=args.camera)
-    try:
-        camera.start()
-    except RuntimeError as e:
-        logger.error("Camera error: %s", e)
-        web_app.update_status(state="ERROR", message=f"Camera error: {e}", face_detected=False)
-        while True:
-            time.sleep(60)
+    camera_attempts = 0
+    critical_logged = False
+    while True:
+        try:
+            camera.start()
+            if camera_attempts:
+                logger.info("Camera initialized after %d retry attempt(s)", camera_attempts)
+            break
+        except RuntimeError as e:
+            camera.stop()
+            camera_attempts += 1
+            logger.error("Camera error during startup (attempt %d): %s", camera_attempts, e)
+            if camera_attempts >= 10 and not critical_logged:
+                logger.critical("Camera failed to initialize after %d attempts; continuing to retry every 30 seconds", camera_attempts)
+                critical_logged = True
+            web_app.update_status(state="ERROR", message=f"Camera error: {e}. Retrying in 30s", face_detected=False)
+            time.sleep(30)
 
     # Shared state
     detect_lock = threading.Lock()

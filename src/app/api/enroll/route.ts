@@ -13,8 +13,15 @@ export async function POST(req: NextRequest) {
       photos?: string[];
     };
 
-    if (!name?.trim()) {
+    const normalizedName = name?.trim();
+
+    if (!normalizedName) {
       return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    }
+
+    const existingWorker = await convex.query(api.workers.findByName, { name: normalizedName });
+    if (existingWorker) {
+      return NextResponse.json({ error: 'Worker name already exists' }, { status: 409 });
     }
 
     if (!photos || photos.length < 3) {
@@ -78,7 +85,7 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await convex.mutation(api.workers.create, {
-      name: name.trim(),
+      name: normalizedName,
       department: department?.trim() || undefined,
       faceEncoding,
       photoStorageIds: storageIds.length > 0 ? storageIds as any : undefined,
@@ -87,7 +94,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         id: result.id,
-        name: name.trim(),
+        name: normalizedName,
         photosCount: storageIds.length,
         encoded: true,
       },

@@ -1,5 +1,6 @@
 """Server synchronization for FW Gatekeeper Kiosk."""
 
+import hashlib
 import json
 import logging
 import os
@@ -30,6 +31,14 @@ def check_server() -> bool:
         return r.status_code == 200
     except Exception:
         return False
+
+
+def _build_idempotency_key(log: dict, server_id: str) -> str:
+    timestamp = str(log.get("timestamp") or "")
+    action = str(log.get("event_type") or log.get("action") or "")
+    kiosk_id = str(log.get("kiosk_id") or config.KIOSK_ID or "")
+    raw_key = f"{server_id}|{timestamp}|{action}|{kiosk_id}"
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
 def sync_attendance() -> bool:
@@ -65,6 +74,7 @@ def sync_attendance() -> bool:
                 "event_type": log.get("event_type") or log.get("action"),
                 "action": log.get("action"),
                 "timestamp": log.get("timestamp"),
+                "idempotency_key": _build_idempotency_key(log, server_id),
                 "liveness_confirmed": log.get("liveness_confirmed"),
                 "confidence": log.get("confidence"),
                 "kiosk_id": log.get("kiosk_id") or config.KIOSK_ID,

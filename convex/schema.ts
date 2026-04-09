@@ -17,6 +17,7 @@ export default defineSchema({
     eventType: v.string(),
     kioskId: v.optional(v.string()),
     timestamp: v.string(),
+    idempotencyKey: v.optional(v.string()),
     synced: v.boolean(),
     workerName: v.optional(v.string()),
     confidence: v.optional(v.float64()),
@@ -26,11 +27,13 @@ export default defineSchema({
 
   kiosks: defineTable({
     name: v.string(),
+    kioskId: v.optional(v.string()),
     type: v.string(),
     location: v.string(),
     lastSync: v.optional(v.string()),
     active: v.boolean(),
-  }).index("by_active", ["active"]),
+  }).index("by_active", ["active"])
+    .index("by_kiosk_id", ["kioskId"]),
 
   schedules: defineTable({
     name: v.string(),
